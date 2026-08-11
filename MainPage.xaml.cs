@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -31,7 +32,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     }
 
     private const int MaxLogEntries = 5000;
+    private const int MaxVisibleLogEntries = 300;
     private const int MaxLineBytes = 2048;
+    private const int MaxReceiveChunksPerDrain = 32;
     private static readonly UTF8Encoding Utf8 = new(false, false);
     private static readonly string[] Palette =
     [
@@ -42,12 +45,14 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private readonly SerialPortService _serialPort = new();
     private readonly TelemetryParser _telemetryParser = new();
-    private readonly List<SerialLogEntry> _allLogs = [];
+    private readonly Queue<SerialLogEntry> _allLogs = [];
+    private readonly ConcurrentQueue<byte[]> _pendingReceiveChunks = [];
     private readonly List<byte> _lineBuffer = [];
     private readonly Dictionary<string, TelemetryMetric> _metricsByName = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _commandHistory = [];
     private readonly DispatcherTimer _demoTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer _plotTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
+    private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
     private readonly Stopwatch _demoClock = new();
     private readonly Random _random = new();
     private bool _loaded;
@@ -58,6 +63,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool _panArmed;
     private bool _isPanning;
     private bool _serialOperationInProgress;
+    private bool _scrollPending;
+    private bool _countersDirty;
+    private int _receiveDrainScheduled;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
     private double _verticalGain = 1;
@@ -87,6 +95,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _serialPort.PortError += SerialPort_PortError;
         _demoTimer.Tick += DemoTimer_Tick;
         _plotTimer.Tick += PlotTimer_Tick;
+        _uiRefreshTimer.Tick += UiRefreshTimer_Tick;
         ActualThemeChanged += MainPage_ActualThemeChanged;
     }
 
@@ -112,6 +121,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         DisplayModeSelector.SelectedItem = AsciiModeItem;
         RefreshPorts();
         _plotTimer.Start();
+        _uiRefreshTimer.Start();
         DemoToggle.IsChecked = true;
         SetDemoMode(true);
         SendTextBox.Focus(FocusState.Programmatic);
@@ -120,6 +130,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void Page_Unloaded(object sender, RoutedEventArgs e)
     {
         _plotTimer.Stop();
+        _uiRefreshTimer.Stop();
         _demoTimer.Stop();
         _ = Task.Run(_serialPort.Close);
     }
@@ -278,7 +289,43 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void SerialPort_BytesReceived(object? sender, byte[] data)
     {
-        DispatcherQueue.TryEnqueue(() => ProcessReceivedBytes(data, SerialDirection.Receive));
+        _pendingReceiveChunks.Enqueue(data);
+        ScheduleReceiveDrain();
+    }
+
+    private void ScheduleReceiveDrain()
+    {
+        if (Interlocked.Exchange(ref _receiveDrainScheduled, 1) != 0)
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.TryEnqueue(DrainReceiveChunks))
+        {
+            Interlocked.Exchange(ref _receiveDrainScheduled, 0);
+        }
+    }
+
+    private void DrainReceiveChunks()
+    {
+        List<byte> batch = [];
+        int chunkCount = 0;
+        while (chunkCount < MaxReceiveChunksPerDrain && _pendingReceiveChunks.TryDequeue(out byte[]? chunk))
+        {
+            batch.AddRange(chunk);
+            chunkCount++;
+        }
+
+        if (batch.Count > 0)
+        {
+            ProcessReceivedBytes(batch.ToArray(), SerialDirection.Receive);
+        }
+
+        Interlocked.Exchange(ref _receiveDrainScheduled, 0);
+        if (!_pendingReceiveChunks.IsEmpty)
+        {
+            ScheduleReceiveDrain();
+        }
     }
 
     private void SerialPort_PortError(object? sender, string message)
@@ -318,7 +365,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             AddSystemLog($"Line exceeded {MaxLineBytes} bytes and was discarded");
         }
 
-        RefreshCounters();
+        _countersDirty = true;
     }
 
     private void ProcessTelemetryLine(string line)
@@ -504,9 +551,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         Logs.Clear();
-        foreach (SerialLogEntry entry in _allLogs)
+        foreach (SerialLogEntry entry in _allLogs.TakeLast(MaxVisibleLogEntries))
         {
-            Logs.Add(entry);
+            Logs.Add(CreateVisibleLogEntry(entry));
         }
 
         EmptyLogText.Visibility = Logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -517,7 +564,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void DisplayModeSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         _displayHex = sender.SelectedItem == HexModeItem;
-        foreach (SerialLogEntry entry in _allLogs)
+        foreach (SerialLogEntry entry in Logs)
         {
             entry.SetHexDisplay(_displayHex);
         }
@@ -618,10 +665,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void AddLog(SerialLogEntry entry)
     {
         entry.SetHexDisplay(_displayHex);
-        _allLogs.Add(entry);
-        if (_allLogs.Count > MaxLogEntries)
+        _allLogs.Enqueue(entry);
+        while (_allLogs.Count > MaxLogEntries)
         {
-            _allLogs.RemoveAt(0);
+            _allLogs.Dequeue();
         }
 
         if (PauseButton.IsChecked == true)
@@ -629,21 +676,55 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
-        Logs.Add(entry);
-        if (Logs.Count > MaxLogEntries)
+        if (Logs.Count < MaxVisibleLogEntries)
+        {
+            Logs.Add(CreateVisibleLogEntry(entry));
+        }
+        else
         {
             Logs.RemoveAt(0);
+            Logs.Add(CreateVisibleLogEntry(entry));
         }
 
         EmptyLogText.Visibility = Visibility.Collapsed;
-        ScrollToLatest();
+        _scrollPending = true;
+    }
+
+    private SerialLogEntry CreateVisibleLogEntry(SerialLogEntry source)
+    {
+        SerialLogEntry visibleEntry = new(source.Timestamp, source.Direction, source.Data, source.TextOverride);
+        visibleEntry.SetHexDisplay(_displayHex);
+        return visibleEntry;
+    }
+
+    private void UiRefreshTimer_Tick(object? sender, object e)
+    {
+        if (_countersDirty)
+        {
+            _countersDirty = false;
+            RefreshCounters();
+        }
+
+        if (_scrollPending && IsConsoleTabSelected && PauseButton.IsChecked != true)
+        {
+            _scrollPending = false;
+            ScrollToLatest();
+        }
     }
 
     private void ScrollToLatest()
     {
         if (AutoScrollButton.IsChecked == true && Logs.Count > 0)
         {
-            LogListView.ScrollIntoView(Logs[^1], ScrollIntoViewAlignment.Leading);
+            LogListView.ScrollIntoView(Logs[^1], ScrollIntoViewAlignment.Default);
+        }
+    }
+
+    private void AutoScrollButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AutoScrollButton.IsChecked == true)
+        {
+            _scrollPending = true;
         }
     }
 
@@ -719,7 +800,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void MainPage_ActualThemeChanged(FrameworkElement sender, object args)
     {
         UpdateThemeButton(ActualTheme);
-        RenderPlot();
+        if (IsScopeTabSelected)
+        {
+            RenderPlot();
+        }
     }
 
     private void UpdateThemeButton(ElementTheme activeTheme)
@@ -733,7 +817,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void PlotTimer_Tick(object? sender, object e)
     {
-        RenderPlot();
+        if (IsScopeTabSelected && !_scopeHeld)
+        {
+            RenderPlot();
+        }
     }
 
     private void ScopeCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -962,8 +1049,29 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         TelemetryPanel.Height = contentHeight;
     }
 
+    private void WorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsScopeTabSelected)
+        {
+            RenderPlot();
+        }
+        else if (IsConsoleTabSelected)
+        {
+            _scrollPending = true;
+        }
+    }
+
+    private bool IsConsoleTabSelected => ReferenceEquals(WorkspaceTabs.SelectedItem, ConsoleTab);
+
+    private bool IsScopeTabSelected => ReferenceEquals(WorkspaceTabs.SelectedItem, ScopeTab);
+
     private void RenderPlot()
     {
+        if (_loaded && !IsScopeTabSelected)
+        {
+            return;
+        }
+
         if (ScopeCanvas is null || ScopeCanvas.ActualWidth < 160 || ScopeCanvas.ActualHeight < 120)
         {
             return;

@@ -8,7 +8,7 @@
 
 ## 下载
 
-Windows 10/11 x64 用户可从 [GitHub Releases](https://github.com/www606611-lang/Stm32SerialLab/releases) 下载 `Stm32SerialLab-v0.1.0-win-x64.zip`。解压完整目录后运行 `Stm32SerialLab.exe`，不要只复制单个 EXE。
+Windows 10/11 x64 用户可从 [GitHub Releases](https://github.com/www606611-lang/Stm32SerialLab/releases) 下载最新的 `Stm32SerialLab-v0.1.1-win-x64.zip`。解压完整目录后运行 `Stm32SerialLab.exe`，不要只复制单个 EXE。
 
 ## 构建链
 
@@ -47,7 +47,7 @@ bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Stm32SerialLab.exe
 - HEX 模式按字节显示；发送区也支持 Text/HEX 输入和行尾选择。
 - `Enter` 发送，方向键上/下浏览最近 100 条发送历史。
 - Pause 只冻结可见时间线，底层接收与统计继续运行；恢复时重新显示有界日志。
-- 原始日志最多保留 5000 条，防止长时间运行时内存无限增长。
+- Console 保留最近 300 条可见记录并采用回收式布局；原始日志最多保留 5000 条供导出，防止长时间运行时内存和 UI 成本无限增长。
 
 ## Scope
 
@@ -63,6 +63,8 @@ bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Stm32SerialLab.exe
 - 每个通道最多保留 6000 个样本；CSV 导出采用 `timestamp,channel,value` 长表格式。
 
 ## 遥测输入
+
+程序启动时默认开启 Demo，底部显示 `DEMO`，并在 PC 端生成 `tick`、`heap`、`adc`、`avg` 和 `overrun` 测试通道。连接真实 COM 口时 Demo 会自动关闭。真实通道不需要在 Scope 中手工创建：固件每输出一个数值 `key=value` 字段，解析器就会自动创建或更新同名通道。
 
 推荐固件每次输出一整行，以 `\r\n` 结束：
 

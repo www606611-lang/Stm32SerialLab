@@ -137,11 +137,12 @@
             HorizontalAlignment="Stretch"
             HorizontalContentAlignment="Stretch"
             IsAddTabButtonVisible="False"
+            SelectionChanged="WorkspaceTabs_SelectionChanged"
             SizeChanged="WorkspaceTabs_SizeChanged"
             TabCloseRequested="WorkspaceTabs_TabCloseRequested"
             VerticalAlignment="Stretch"
             VerticalContentAlignment="Stretch">
-            <TabViewItem Header="Console" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
+            <TabViewItem x:Name="ConsoleTab" Header="Console" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
                 <Grid x:Name="ConsolePanel" RowSpacing="0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -172,6 +173,7 @@
                             ToolTipService.ToolTip="Pause the visible timeline" />
                         <AppBarToggleButton
                             x:Name="AutoScrollButton"
+                            Click="AutoScrollButton_Click"
                             Icon="Download"
                             IsChecked="True"
                             Label="Auto scroll"
@@ -195,6 +197,11 @@
                             ItemsSource="{x:Bind Logs}"
                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
                             SelectionMode="None">
+                            <ListView.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsStackPanel ChildrenTransitions="{x:Null}" ItemsUpdatingScrollMode="KeepItemsInView" />
+                                </ItemsPanelTemplate>
+                            </ListView.ItemsPanel>
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">
                                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -306,7 +313,7 @@
                 </Grid>
             </TabViewItem>
 
-            <TabViewItem Header="Scope" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
+            <TabViewItem x:Name="ScopeTab" Header="Scope" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
                 <Grid x:Name="ScopePanel" ColumnSpacing="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -485,7 +492,7 @@
                 </Grid>
             </TabViewItem>
 
-            <TabViewItem Header="Telemetry" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
+            <TabViewItem x:Name="TelemetryTab" Header="Telemetry" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
                 <Grid x:Name="TelemetryPanel">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="35" />
