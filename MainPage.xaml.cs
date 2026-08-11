@@ -23,6 +23,13 @@ namespace Stm32SerialLab;
 
 public sealed partial class MainPage : Page, INotifyPropertyChanged
 {
+    private enum YAxisMode
+    {
+        Follow,
+        Manual,
+        FullRange
+    }
+
     private const int MaxLogEntries = 5000;
     private const int MaxLineBytes = 2048;
     private static readonly UTF8Encoding Utf8 = new(false, false);
@@ -45,7 +52,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private readonly Random _random = new();
     private bool _loaded;
     private bool _displayHex;
-    private bool _autoYEnabled = true;
     private bool _autoYInitialized;
     private bool _manualYInitialized;
     private bool _scopeHeld;
@@ -58,6 +64,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private double _autoYMaximum;
     private double _manualYCenter;
     private double _manualYBaseSpan;
+    private double _lastRenderedYMinimum;
+    private double _lastRenderedYMaximum;
     private double _panStartX;
     private DateTimeOffset _lastAutoYUpdate = DateTimeOffset.Now;
     private DateTimeOffset _scopeEndTime;
@@ -68,6 +76,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private long _rxLines;
     private long _parseErrors;
     private long _connectionErrors;
+    private bool _lastRenderedYAxisInitialized;
+    private YAxisMode _yAxisMode = YAxisMode.Follow;
 
     public MainPage()
     {
@@ -188,6 +198,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
             if (!_demoTimer.IsEnabled)
             {
+                EnsureDemoMetadata();
                 _demoClock.Restart();
                 _demoTimer.Start();
                 AddSystemLog("Demo telemetry started");
@@ -204,6 +215,21 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 SetConnectionState(false, "DISCONNECTED");
             }
         }
+    }
+
+    private void EnsureDemoMetadata()
+    {
+        if (_metricsByName.TryGetValue("adc", out TelemetryMetric? adcMetric) && adcMetric.HasDeclaredRange)
+        {
+            return;
+        }
+
+        const string metadata = "@meta tick unit=ms\r\n" +
+                                "@meta heap unit=B min=0 max=6144\r\n" +
+                                "@meta adc unit=count min=0 max=4095\r\n" +
+                                "@meta avg unit=count min=0 max=4095\r\n" +
+                                "@meta overrun unit=count\r\n";
+        ProcessReceivedBytes(Encoding.ASCII.GetBytes(metadata), SerialDirection.Demo);
     }
 
     private void DemoTimer_Tick(object? sender, object e)
@@ -268,6 +294,13 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         if (result.IsError)
         {
             _parseErrors++;
+            return;
+        }
+
+        if (result.Metadata is { } metadata)
+        {
+            GetOrCreateMetric(metadata.Name).ApplyMetadata(metadata.Unit, metadata.Minimum, metadata.Maximum);
+            TransientStatusText.Text = $"Metadata: {metadata.Name}";
             return;
         }
 
@@ -587,8 +620,18 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         ConnectionDot.Fill = new SolidColorBrush(connected
             ? ColorHelper.FromArgb(255, 22, 163, 74)
             : ColorHelper.FromArgb(255, 107, 114, 128));
-        ConnectButton.Content = new SymbolIcon(connected ? Symbol.Stop : Symbol.Play);
+        ConnectButton.Content = CreateToolbarIcon(connected ? "\uE71A" : "\uE768");
         TransientStatusText.Text = text;
+    }
+
+    private static FontIcon CreateToolbarIcon(string glyph)
+    {
+        return new FontIcon
+        {
+            FontFamily = new FontFamily("Segoe Fluent Icons"),
+            FontSize = 18,
+            Glyph = glyph
+        };
     }
 
     private void ThemeButton_Click(object sender, RoutedEventArgs e)
@@ -633,44 +676,68 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         RenderPlot();
     }
 
-    private void AutoYButton_Click(object sender, RoutedEventArgs e)
+    private void YAxisFollow_Click(object sender, RoutedEventArgs e)
     {
-        if (AutoYButton.IsChecked == true)
-        {
-            EnableAutoY();
-        }
-        else
-        {
-            DisableAutoY();
-        }
+        SetYAxisFollow();
     }
 
-    private void EnableAutoY()
+    private void YAxisFitOnce_Click(object sender, RoutedEventArgs e)
     {
-        _autoYEnabled = true;
+        _yAxisMode = YAxisMode.Manual;
+        _manualYInitialized = false;
+        VerticalGainSlider.Value = 4;
+        VerticalGainSlider.IsEnabled = true;
+        UpdateYAxisModeButton("Y: Fit", "Y axis mode Fit once");
+        TransientStatusText.Text = "Y axis fitted once";
+        RenderPlot();
+    }
+
+    private void YAxisFullRange_Click(object sender, RoutedEventArgs e)
+    {
+        _yAxisMode = YAxisMode.FullRange;
+        VerticalGainSlider.IsEnabled = false;
+        UpdateYAxisModeButton("Auto: Full", "Y axis mode Full range");
+        bool hasMetadata = Metrics.Any(metric => metric.IsVisible && metric.HasDeclaredRange);
+        TransientStatusText.Text = hasMetadata ? "Using declared channel range" : "Full range: no metadata, using visible data";
+        RenderPlot();
+    }
+
+    private void YAxisManual_Click(object sender, RoutedEventArgs e)
+    {
+        FreezeCurrentYAxis();
+        _yAxisMode = YAxisMode.Manual;
+        VerticalGainSlider.Value = 4;
+        VerticalGainSlider.IsEnabled = true;
+        UpdateYAxisModeButton("Y: Manual", "Y axis mode Manual");
+        TransientStatusText.Text = "Manual Y scale";
+        RenderPlot();
+    }
+
+    private void SetYAxisFollow()
+    {
+        _yAxisMode = YAxisMode.Follow;
         _autoYInitialized = false;
         _lastAutoYUpdate = DateTimeOffset.Now;
         VerticalGainSlider.IsEnabled = false;
-        AutoYButton.IsChecked = true;
-        TransientStatusText.Text = "Auto Y enabled";
+        UpdateYAxisModeButton("Auto: Follow", "Y axis mode Follow");
+        TransientStatusText.Text = "Auto Y following";
         RenderPlot();
     }
 
-    private void DisableAutoY()
+    private void FreezeCurrentYAxis()
     {
-        if (_autoYInitialized)
+        if (_lastRenderedYAxisInitialized)
         {
-            _manualYCenter = (_autoYMinimum + _autoYMaximum) / 2;
-            _manualYBaseSpan = Math.Max(1e-9, _autoYMaximum - _autoYMinimum);
+            _manualYCenter = (_lastRenderedYMinimum + _lastRenderedYMaximum) / 2;
+            _manualYBaseSpan = Math.Max(1e-9, _lastRenderedYMaximum - _lastRenderedYMinimum);
             _manualYInitialized = true;
         }
+    }
 
-        _autoYEnabled = false;
-        VerticalGainSlider.Value = 4;
-        VerticalGainSlider.IsEnabled = true;
-        AutoYButton.IsChecked = false;
-        TransientStatusText.Text = "Manual Y scale";
-        RenderPlot();
+    private void UpdateYAxisModeButton(string content, string automationName)
+    {
+        AutoYModeButton.Content = content;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(AutoYModeButton, automationName);
     }
 
     private void ScopeHoldButton_Click(object sender, RoutedEventArgs e)
@@ -694,7 +761,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         TimeWindowSlider.Value = 6;
         VerticalGainSlider.Value = 4;
-        EnableAutoY();
+        SetYAxisFollow();
         GoToLiveScope();
     }
 
@@ -851,7 +918,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
-        ResolveYAxis(allSamples, out double minValue, out double maxValue);
+        ResolveYAxis(selected, allSamples, out double minValue, out double maxValue);
+        _lastRenderedYMinimum = minValue;
+        _lastRenderedYMaximum = maxValue;
+        _lastRenderedYAxisInitialized = true;
         double milliseconds = windowSeconds * 1000;
 
         AddCanvasLabel(maxValue.ToString("0.###", CultureInfo.InvariantCulture), 4, top - 7, labelBrush);
@@ -911,7 +981,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         };
     }
 
-    private void ResolveYAxis(TelemetrySample[] samples, out double minimum, out double maximum)
+    private void ResolveYAxis(IReadOnlyList<TelemetryMetric> metrics, TelemetrySample[] samples, out double minimum, out double maximum)
     {
         double rawMinimum = samples.Min(sample => sample.Value);
         double rawMaximum = samples.Max(sample => sample.Value);
@@ -927,7 +997,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         double targetMinimum = rawCenter - (targetSpan / 2);
         double targetMaximum = rawCenter + (targetSpan / 2);
 
-        if (_autoYEnabled)
+        if (_yAxisMode == YAxisMode.Follow)
         {
             DateTimeOffset now = DateTimeOffset.Now;
             if (!_autoYInitialized)
@@ -956,6 +1026,29 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             _lastAutoYUpdate = now;
             minimum = _autoYMinimum;
             maximum = _autoYMaximum;
+            return;
+        }
+
+        if (_yAxisMode == YAxisMode.FullRange)
+        {
+            TelemetryMetric[] declaredMetrics = metrics.Where(metric => metric.HasDeclaredRange).ToArray();
+            if (declaredMetrics.Length > 0)
+            {
+                minimum = declaredMetrics.Min(metric => metric.DeclaredMinimum!.Value);
+                maximum = declaredMetrics.Max(metric => metric.DeclaredMaximum!.Value);
+                minimum = Math.Min(minimum, rawMinimum);
+                maximum = Math.Max(maximum, rawMaximum);
+                if (Math.Abs(maximum - minimum) < 1e-9)
+                {
+                    minimum -= 1;
+                    maximum += 1;
+                }
+
+                return;
+            }
+
+            minimum = targetMinimum;
+            maximum = targetMaximum;
             return;
         }
 

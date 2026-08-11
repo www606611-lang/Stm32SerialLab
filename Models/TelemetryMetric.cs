@@ -19,6 +19,11 @@ public sealed class TelemetryMetric : INotifyPropertyChanged
     }
 
     public string Name { get; }
+    public string? Unit { get; private set; }
+    public double? DeclaredMinimum { get; private set; }
+    public double? DeclaredMaximum { get; private set; }
+    public bool HasDeclaredRange => DeclaredMinimum.HasValue && DeclaredMaximum.HasValue && DeclaredMinimum.Value < DeclaredMaximum.Value;
+    public string DisplayName => string.IsNullOrWhiteSpace(Unit) ? Name : $"{Name} ({Unit})";
     public SolidColorBrush Stroke { get; }
     public Queue<TelemetrySample> Samples { get; } = new();
     public double Latest { get; private set; }
@@ -46,6 +51,18 @@ public sealed class TelemetryMetric : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void ApplyMetadata(string? unit, double? minimum, double? maximum)
+    {
+        Unit = unit;
+        DeclaredMinimum = minimum;
+        DeclaredMaximum = maximum;
+        OnPropertyChanged(nameof(Unit));
+        OnPropertyChanged(nameof(DeclaredMinimum));
+        OnPropertyChanged(nameof(DeclaredMaximum));
+        OnPropertyChanged(nameof(HasDeclaredRange));
+        OnPropertyChanged(nameof(DisplayName));
+    }
 
     public void AddSample(DateTimeOffset timestamp, double value)
     {
