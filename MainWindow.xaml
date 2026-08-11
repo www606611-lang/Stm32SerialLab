@@ -20,7 +20,7 @@
 
         <TitleBar x:Name="AppTitleBar" Subtitle="serial telemetry instrument" Title="STM32 Serial Lab">
             <TitleBar.IconSource>
-                <FontIconSource FontFamily="Segoe Fluent Icons" Glyph="&#xE756;" />
+                <BitmapIconSource ShowAsMonochrome="False" UriSource="ms-appx:///Assets/AppIcon.png" />
             </TitleBar.IconSource>
         </TitleBar>
 
