@@ -344,6 +344,7 @@
                                     x:Name="VerticalGainSlider"
                                     Width="104"
                                     AutomationProperties.Name="Scope vertical gain"
+                                    IsEnabled="False"
                                     Maximum="10"
                                     Minimum="0"
                                     StepFrequency="1"
@@ -355,7 +356,15 @@
                                     Width="42"
                                     VerticalAlignment="Center"
                                     Style="{StaticResource LabMonoTextStyle}"
-                                    Text="1.0x" />
+                                    Text="1x" />
+                                <ToggleButton
+                                    x:Name="AutoYButton"
+                                    MinWidth="64"
+                                    AutomationProperties.Name="Automatic vertical scale"
+                                    Click="AutoYButton_Click"
+                                    Content="Auto Y"
+                                    IsChecked="True"
+                                    ToolTipService.ToolTip="Automatically follow the visible signal range" />
                                 <TextBlock
                                     x:Name="ScopeModeText"
                                     VerticalAlignment="Center"

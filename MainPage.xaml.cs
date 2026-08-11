@@ -45,13 +45,21 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private readonly Random _random = new();
     private bool _loaded;
     private bool _displayHex;
+    private bool _autoYEnabled = true;
+    private bool _autoYInitialized;
+    private bool _manualYInitialized;
     private bool _scopeHeld;
     private bool _panArmed;
     private bool _isPanning;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
     private double _verticalGain = 1;
+    private double _autoYMinimum;
+    private double _autoYMaximum;
+    private double _manualYCenter;
+    private double _manualYBaseSpan;
     private double _panStartX;
+    private DateTimeOffset _lastAutoYUpdate = DateTimeOffset.Now;
     private DateTimeOffset _scopeEndTime;
     private DateTimeOffset _panStartEndTime;
     private double _demoAverage = 1870;
@@ -625,6 +633,46 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         RenderPlot();
     }
 
+    private void AutoYButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AutoYButton.IsChecked == true)
+        {
+            EnableAutoY();
+        }
+        else
+        {
+            DisableAutoY();
+        }
+    }
+
+    private void EnableAutoY()
+    {
+        _autoYEnabled = true;
+        _autoYInitialized = false;
+        _lastAutoYUpdate = DateTimeOffset.Now;
+        VerticalGainSlider.IsEnabled = false;
+        AutoYButton.IsChecked = true;
+        TransientStatusText.Text = "Auto Y enabled";
+        RenderPlot();
+    }
+
+    private void DisableAutoY()
+    {
+        if (_autoYInitialized)
+        {
+            _manualYCenter = (_autoYMinimum + _autoYMaximum) / 2;
+            _manualYBaseSpan = Math.Max(1e-9, _autoYMaximum - _autoYMinimum);
+            _manualYInitialized = true;
+        }
+
+        _autoYEnabled = false;
+        VerticalGainSlider.Value = 4;
+        VerticalGainSlider.IsEnabled = true;
+        AutoYButton.IsChecked = false;
+        TransientStatusText.Text = "Manual Y scale";
+        RenderPlot();
+    }
+
     private void ScopeHoldButton_Click(object sender, RoutedEventArgs e)
     {
         if (ScopeHoldButton.IsChecked == true)
@@ -646,6 +694,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         TimeWindowSlider.Value = 6;
         VerticalGainSlider.Value = 4;
+        EnableAutoY();
         GoToLiveScope();
     }
 
@@ -802,21 +851,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
-        double minValue = allSamples.Min(sample => sample.Value);
-        double maxValue = allSamples.Max(sample => sample.Value);
-        if (Math.Abs(maxValue - minValue) < 1e-9)
-        {
-            minValue -= 1;
-            maxValue += 1;
-        }
-
-        double padding = (maxValue - minValue) * 0.08;
-        minValue -= padding;
-        maxValue += padding;
-        double center = (minValue + maxValue) / 2;
-        double halfSpan = (maxValue - minValue) / (2 * _verticalGain);
-        minValue = center - halfSpan;
-        maxValue = center + halfSpan;
+        ResolveYAxis(allSamples, out double minValue, out double maxValue);
         double milliseconds = windowSeconds * 1000;
 
         AddCanvasLabel(maxValue.ToString("0.###", CultureInfo.InvariantCulture), 4, top - 7, labelBrush);
@@ -874,6 +909,66 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             0.5 => "1/2x",
             _ => $"{gain:0}x"
         };
+    }
+
+    private void ResolveYAxis(TelemetrySample[] samples, out double minimum, out double maximum)
+    {
+        double rawMinimum = samples.Min(sample => sample.Value);
+        double rawMaximum = samples.Max(sample => sample.Value);
+        double rawCenter = (rawMinimum + rawMaximum) / 2;
+        double rawSpan = rawMaximum - rawMinimum;
+        if (rawSpan < 1e-9)
+        {
+            rawSpan = Math.Max(1, Math.Abs(rawCenter) * 0.01);
+        }
+
+        const double targetOccupancy = 0.65;
+        double targetSpan = rawSpan / targetOccupancy;
+        double targetMinimum = rawCenter - (targetSpan / 2);
+        double targetMaximum = rawCenter + (targetSpan / 2);
+
+        if (_autoYEnabled)
+        {
+            DateTimeOffset now = DateTimeOffset.Now;
+            if (!_autoYInitialized)
+            {
+                _autoYMinimum = targetMinimum;
+                _autoYMaximum = targetMaximum;
+                _autoYInitialized = true;
+            }
+            else if (!_scopeHeld)
+            {
+                bool needsExpansion = targetMinimum < _autoYMinimum || targetMaximum > _autoYMaximum;
+                if (needsExpansion)
+                {
+                    _autoYMinimum = Math.Min(_autoYMinimum, targetMinimum);
+                    _autoYMaximum = Math.Max(_autoYMaximum, targetMaximum);
+                }
+                else
+                {
+                    double elapsed = Math.Clamp((now - _lastAutoYUpdate).TotalSeconds, 0, 0.5);
+                    double contraction = 1 - Math.Exp(-elapsed / 2.0);
+                    _autoYMinimum += (targetMinimum - _autoYMinimum) * contraction;
+                    _autoYMaximum += (targetMaximum - _autoYMaximum) * contraction;
+                }
+            }
+
+            _lastAutoYUpdate = now;
+            minimum = _autoYMinimum;
+            maximum = _autoYMaximum;
+            return;
+        }
+
+        if (!_manualYInitialized)
+        {
+            _manualYCenter = rawCenter;
+            _manualYBaseSpan = targetSpan;
+            _manualYInitialized = true;
+        }
+
+        double manualSpan = Math.Max(1e-9, _manualYBaseSpan / _verticalGain);
+        minimum = _manualYCenter - (manualSpan / 2);
+        maximum = _manualYCenter + (manualSpan / 2);
     }
 
     private void RefreshCounters()
