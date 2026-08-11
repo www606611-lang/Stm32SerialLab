@@ -102,11 +102,11 @@
                 Grid.Column="5"
                 Width="40"
                 AccessKey="C"
-                AutomationProperties.Name="Connect or disconnect serial port"
+                AutomationProperties.Name="Connect serial port"
                 Click="Connect_Click"
                 Padding="0"
-                ToolTipService.ToolTip="Connect or disconnect">
-                <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Glyph="&#xE768;" />
+                ToolTipService.ToolTip="Connect serial port">
+                <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Glyph="&#xE703;" />
             </Button>
             <ToggleButton
                 x:Name="DemoToggle"

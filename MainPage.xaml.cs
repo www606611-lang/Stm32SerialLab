@@ -57,6 +57,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool _scopeHeld;
     private bool _panArmed;
     private bool _isPanning;
+    private bool _serialOperationInProgress;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
     private double _verticalGain = 1;
@@ -120,7 +121,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         _plotTimer.Stop();
         _demoTimer.Stop();
-        _serialPort.Close();
+        _ = Task.Run(_serialPort.Close);
     }
 
     private void RefreshPorts_Click(object sender, RoutedEventArgs e)
@@ -149,13 +150,35 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         TransientStatusText.Text = PortNames.Count == 0 ? "No COM ports" : $"{PortNames.Count} port(s)";
     }
 
-    private void Connect_Click(object sender, RoutedEventArgs e)
+    private async void Connect_Click(object sender, RoutedEventArgs e)
     {
+        if (_serialOperationInProgress)
+        {
+            return;
+        }
+
         if (_serialPort.IsOpen)
         {
-            _serialPort.Close();
-            SetConnectionState(false, "DISCONNECTED");
-            AddSystemLog("Port closed");
+            SetSerialOperationState(true, "Disconnecting serial port");
+            SetConnectionState(true, "DISCONNECTING...");
+            try
+            {
+                await Task.Run(_serialPort.Close);
+                SetConnectionState(false, "DISCONNECTED");
+                AddSystemLog("Port closed");
+            }
+            catch (Exception exception)
+            {
+                _connectionErrors++;
+                SetConnectionState(_serialPort.IsOpen, "DISCONNECT ERROR");
+                AddSystemLog(exception.Message);
+            }
+            finally
+            {
+                SetSerialOperationState(false);
+                RefreshCounters();
+            }
+
             return;
         }
 
@@ -171,15 +194,23 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             DemoToggle.IsChecked = false;
             SetDemoMode(false);
-            _serialPort.Open(portName, baudRate);
+            SetSerialOperationState(true, $"Connecting to {portName}");
+            SetConnectionState(false, $"CONNECTING {portName}...");
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            await Task.Run(() => _serialPort.Open(portName, baudRate));
+            stopwatch.Stop();
             SetConnectionState(true, $"{portName} @ {baudRate}");
-            AddSystemLog($"Opened {portName}, {baudRate} baud, 8-N-1");
+            AddSystemLog($"Opened {portName}, {baudRate} baud, 8-N-1 in {stopwatch.Elapsed.TotalSeconds:0.0}s");
         }
         catch (Exception exception)
         {
             _connectionErrors++;
             SetConnectionState(false, "CONNECT ERROR");
             AddSystemLog(exception.Message);
+        }
+        finally
+        {
+            SetSerialOperationState(false);
             RefreshCounters();
         }
     }
@@ -622,8 +653,45 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         ConnectionDot.Fill = new SolidColorBrush(connected
             ? ColorHelper.FromArgb(255, 22, 163, 74)
             : ColorHelper.FromArgb(255, 107, 114, 128));
-        ConnectButton.Content = CreateToolbarIcon(connected ? "\uE71A" : "\uE768");
+        if (!_serialOperationInProgress)
+        {
+            UpdateConnectButton(connected);
+        }
+
         TransientStatusText.Text = text;
+    }
+
+    private void SetSerialOperationState(bool inProgress, string? accessibleName = null)
+    {
+        _serialOperationInProgress = inProgress;
+        ConnectButton.IsEnabled = !inProgress;
+        PortComboBox.IsEnabled = !inProgress && !_serialPort.IsOpen;
+        BaudComboBox.IsEnabled = !inProgress && !_serialPort.IsOpen;
+        DemoToggle.IsEnabled = !inProgress;
+
+        if (inProgress)
+        {
+            string name = accessibleName ?? "Serial operation in progress";
+            ConnectButton.Content = new ProgressRing
+            {
+                Width = 18,
+                Height = 18,
+                IsActive = true
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ConnectButton, name);
+            ToolTipService.SetToolTip(ConnectButton, name);
+            return;
+        }
+
+        UpdateConnectButton(_serialPort.IsOpen);
+    }
+
+    private void UpdateConnectButton(bool connected)
+    {
+        string action = connected ? "Disconnect serial port" : "Connect serial port";
+        ConnectButton.Content = CreateToolbarIcon(connected ? "\uE71A" : "\uE703");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ConnectButton, action);
+        ToolTipService.SetToolTip(ConnectButton, action);
     }
 
     private static FontIcon CreateToolbarIcon(string glyph)
