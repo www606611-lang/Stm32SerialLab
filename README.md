@@ -8,7 +8,7 @@
 
 ## 下载
 
-Windows 10/11 x64 用户可从 [GitHub Releases](https://github.com/www606611-lang/Stm32SerialLab/releases) 下载最新的 `Stm32SerialLab-v0.1.1-win-x64.zip`。解压完整目录后运行 `Stm32SerialLab.exe`，不要只复制单个 EXE。
+Windows 10/11 x64 用户可从 [GitHub Releases](https://github.com/www606611-lang/Stm32SerialLab/releases) 下载最新的 `Stm32SerialLab-v0.1.2-win-x64.zip`。解压完整目录后运行 `Stm32SerialLab.exe`，不要只复制单个 EXE。
 
 ## 构建链
 
@@ -43,6 +43,7 @@ bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Stm32SerialLab.exe
 
 - 选择 COM 口和波特率后连接；串口固定为 8 数据位、无校验、1 停止位。
 - RX、TX、SIM、SYS 分方向显示时间戳、字节数和内容。
+- 每个 RX 行保留一次 `SerialPort.DataReceived` 读取块的边界；这个边界受驱动缓冲和时序影响，不等同于固件应用协议的包边界。
 - ASCII 模式把回车、换行、制表符和不可打印字节显示为 `\r`、`\n`、`\t`、`\xNN`。
 - HEX 模式按字节显示；发送区也支持 Text/HEX 输入和行尾选择。
 - `Enter` 发送，方向键上/下浏览最近 100 条发送历史。

@@ -295,19 +295,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void DrainReceiveChunks()
     {
-        List<byte> batch = [];
         int chunkCount = 0;
         while (chunkCount < MaxReceiveChunksPerDrain && _pendingReceiveChunks.TryDequeue(out byte[]? chunk))
         {
-            batch.AddRange(chunk);
+            ProcessReceivedBytes(chunk, SerialDirection.Receive);
             chunkCount++;
         }
-
-        if (batch.Count > 0)
-        {
-            ProcessReceivedBytes(batch.ToArray(), SerialDirection.Receive);
-        }
-
     }
 
     private void SerialPort_PortError(object? sender, string message)
