@@ -31,7 +31,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         "#0F766E", "#2563EB", "#DC2626", "#9333EA", "#CA8A04", "#0891B2", "#DB2777", "#4D7C0F"
     ];
     private static readonly double[] TimeWindowSteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300];
-    private static readonly double[] VerticalGainSteps = [1, 2, 4, 8, 16, 32, 64];
+    private static readonly double[] VerticalGainSteps = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64];
 
     private readonly SerialPortService _serialPort = new();
     private readonly TelemetryParser _telemetryParser = new();
@@ -618,7 +618,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _verticalGain = VerticalGainSteps[index];
         if (VerticalGainText is not null)
         {
-            VerticalGainText.Text = $"{_verticalGain:0}x";
+            VerticalGainText.Text = FormatVerticalGain(_verticalGain);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(VerticalGainSlider, $"Scope vertical gain {VerticalGainText.Text}");
         }
 
@@ -645,7 +645,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void ScopeResetButton_Click(object sender, RoutedEventArgs e)
     {
         TimeWindowSlider.Value = 6;
-        VerticalGainSlider.Value = 0;
+        VerticalGainSlider.Value = 4;
         GoToLiveScope();
     }
 
@@ -862,6 +862,18 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private static string FormatTimeWindow(double seconds)
     {
         return seconds < 1 ? $"{seconds * 1000:0} ms" : $"{seconds:0.#} s";
+    }
+
+    private static string FormatVerticalGain(double gain)
+    {
+        return gain switch
+        {
+            0.0625 => "1/16x",
+            0.125 => "1/8x",
+            0.25 => "1/4x",
+            0.5 => "1/2x",
+            _ => $"{gain:0}x"
+        };
     }
 
     private void RefreshCounters()

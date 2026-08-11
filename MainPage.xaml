@@ -344,11 +344,11 @@
                                     x:Name="VerticalGainSlider"
                                     Width="104"
                                     AutomationProperties.Name="Scope vertical gain"
-                                    Maximum="6"
+                                    Maximum="10"
                                     Minimum="0"
                                     StepFrequency="1"
-                                    ToolTipService.ToolTip="Vertical waveform magnification: 1x to 64x"
-                                    Value="0"
+                                    ToolTipService.ToolTip="Vertical waveform scale: 1/16x to 64x"
+                                    Value="4"
                                     ValueChanged="VerticalGainSlider_ValueChanged" />
                                 <TextBlock
                                     x:Name="VerticalGainText"
