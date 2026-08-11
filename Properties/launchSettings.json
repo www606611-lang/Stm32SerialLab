@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Stm32SerialLab (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Stm32SerialLab (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
