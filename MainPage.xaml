@@ -195,11 +195,12 @@
                             x:Name="LogListView"
                             AutomationProperties.Name="Serial traffic timeline"
                             ItemsSource="{x:Bind Logs}"
+                            Loaded="LogListView_Loaded"
                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
                             SelectionMode="None">
                             <ListView.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <ItemsStackPanel ChildrenTransitions="{x:Null}" ItemsUpdatingScrollMode="KeepItemsInView" />
+                                    <ItemsStackPanel />
                                 </ItemsPanelTemplate>
                             </ListView.ItemsPanel>
                             <ListView.ItemContainerStyle>

@@ -34,7 +34,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private const int MaxLogEntries = 5000;
     private const int MaxVisibleLogEntries = 300;
     private const int MaxLineBytes = 2048;
-    private const int MaxReceiveChunksPerDrain = 32;
+    private const int MaxReceiveChunksPerDrain = 64;
+    private const int MaxVisibleUpdatesPerRefresh = 32;
     private static readonly UTF8Encoding Utf8 = new(false, false);
     private static readonly string[] Palette =
     [
@@ -46,6 +47,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private readonly SerialPortService _serialPort = new();
     private readonly TelemetryParser _telemetryParser = new();
     private readonly Queue<SerialLogEntry> _allLogs = [];
+    private readonly Queue<SerialLogEntry> _pendingVisibleLogs = [];
     private readonly ConcurrentQueue<byte[]> _pendingReceiveChunks = [];
     private readonly List<byte> _lineBuffer = [];
     private readonly Dictionary<string, TelemetryMetric> _metricsByName = new(StringComparer.OrdinalIgnoreCase);
@@ -63,9 +65,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool _panArmed;
     private bool _isPanning;
     private bool _serialOperationInProgress;
-    private bool _scrollPending;
     private bool _countersDirty;
-    private int _receiveDrainScheduled;
+    private ItemsStackPanel? _logItemsPanel;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
     private double _verticalGain = 1;
@@ -290,20 +291,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void SerialPort_BytesReceived(object? sender, byte[] data)
     {
         _pendingReceiveChunks.Enqueue(data);
-        ScheduleReceiveDrain();
-    }
-
-    private void ScheduleReceiveDrain()
-    {
-        if (Interlocked.Exchange(ref _receiveDrainScheduled, 1) != 0)
-        {
-            return;
-        }
-
-        if (!DispatcherQueue.TryEnqueue(DrainReceiveChunks))
-        {
-            Interlocked.Exchange(ref _receiveDrainScheduled, 0);
-        }
     }
 
     private void DrainReceiveChunks()
@@ -321,11 +308,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             ProcessReceivedBytes(batch.ToArray(), SerialDirection.Receive);
         }
 
-        Interlocked.Exchange(ref _receiveDrainScheduled, 0);
-        if (!_pendingReceiveChunks.IsEmpty)
-        {
-            ScheduleReceiveDrain();
-        }
     }
 
     private void SerialPort_PortError(object? sender, string message)
@@ -546,15 +528,19 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         if (PauseButton.IsChecked == true)
         {
+            _pendingVisibleLogs.Clear();
             TransientStatusText.Text = "Timeline paused";
             return;
         }
 
+        _pendingVisibleLogs.Clear();
         Logs.Clear();
         foreach (SerialLogEntry entry in _allLogs.TakeLast(MaxVisibleLogEntries))
         {
-            Logs.Add(CreateVisibleLogEntry(entry));
+            _pendingVisibleLogs.Enqueue(entry);
         }
+
+        FlushVisibleLogs(MaxVisibleLogEntries);
 
         EmptyLogText.Visibility = Logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ScrollToLatest();
@@ -573,6 +559,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void ClearLog_Click(object sender, RoutedEventArgs e)
     {
         _allLogs.Clear();
+        _pendingVisibleLogs.Clear();
         Logs.Clear();
         _lineBuffer.Clear();
         Metrics.Clear();
@@ -676,18 +663,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
-        if (Logs.Count < MaxVisibleLogEntries)
+        _pendingVisibleLogs.Enqueue(entry);
+        while (_pendingVisibleLogs.Count > MaxVisibleLogEntries)
         {
-            Logs.Add(CreateVisibleLogEntry(entry));
+            _pendingVisibleLogs.Dequeue();
         }
-        else
-        {
-            Logs.RemoveAt(0);
-            Logs.Add(CreateVisibleLogEntry(entry));
-        }
-
-        EmptyLogText.Visibility = Visibility.Collapsed;
-        _scrollPending = true;
     }
 
     private SerialLogEntry CreateVisibleLogEntry(SerialLogEntry source)
@@ -699,17 +679,38 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void UiRefreshTimer_Tick(object? sender, object e)
     {
+        DrainReceiveChunks();
+        FlushVisibleLogs(MaxVisibleUpdatesPerRefresh);
+
         if (_countersDirty)
         {
             _countersDirty = false;
             RefreshCounters();
         }
 
-        if (_scrollPending && IsConsoleTabSelected && PauseButton.IsChecked != true)
+    }
+
+    private void FlushVisibleLogs(int maximumUpdates)
+    {
+        int updateCount = 0;
+        while (updateCount < maximumUpdates && _pendingVisibleLogs.Count > 0)
         {
-            _scrollPending = false;
-            ScrollToLatest();
+            SerialLogEntry entry = _pendingVisibleLogs.Dequeue();
+            if (Logs.Count >= MaxVisibleLogEntries)
+            {
+                Logs.RemoveAt(0);
+            }
+
+            Logs.Add(CreateVisibleLogEntry(entry));
+            updateCount++;
         }
+
+        if (updateCount == 0)
+        {
+            return;
+        }
+
+        EmptyLogText.Visibility = Visibility.Collapsed;
     }
 
     private void ScrollToLatest()
@@ -722,10 +723,50 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void AutoScrollButton_Click(object sender, RoutedEventArgs e)
     {
+        UpdateLogScrollMode();
         if (AutoScrollButton.IsChecked == true)
         {
-            _scrollPending = true;
+            ScrollToLatest();
         }
+    }
+
+    private void LogListView_Loaded(object sender, RoutedEventArgs e)
+    {
+        _logItemsPanel = FindVisualChild<ItemsStackPanel>(LogListView);
+        UpdateLogScrollMode();
+    }
+
+    private void UpdateLogScrollMode()
+    {
+        if (_logItemsPanel is null)
+        {
+            return;
+        }
+
+        _logItemsPanel.ItemsUpdatingScrollMode = AutoScrollButton.IsChecked == true
+            ? ItemsUpdatingScrollMode.KeepLastItemInView
+            : ItemsUpdatingScrollMode.KeepItemsInView;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(parent);
+        for (int index = 0; index < childCount; index++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            T? descendant = FindVisualChild<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 
     private void SetConnectionState(bool connected, string text)
@@ -1057,7 +1098,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
         else if (IsConsoleTabSelected)
         {
-            _scrollPending = true;
+            ScrollToLatest();
         }
     }
 
