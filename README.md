@@ -1,6 +1,14 @@
 # STM32 Serial Lab
 
-这是 `stm32_twice` 学习路线专用的 Windows 串口与遥测工具。它独立于裸机和 FreeRTOS 固件构建系统：固件负责输出证据，工具负责把字节、文本和数值证据显示清楚。
+<p align="center">
+  <img src="Assets/AppIcon.png" width="112" alt="STM32 Serial Lab icon">
+</p>
+
+面向 STM32 学习与调试的独立 Windows 串口、遥测和实时波形工具。它独立于裸机和 FreeRTOS 固件构建系统：固件负责输出证据，工具负责把字节、文本和数值证据显示清楚。
+
+## 下载
+
+Windows 10/11 x64 用户可从 [GitHub Releases](https://github.com/www606611-lang/Stm32SerialLab/releases) 下载 `Stm32SerialLab-v0.1.0-win-x64.zip`。解压完整目录后运行 `Stm32SerialLab.exe`，不要只复制单个 EXE。
 
 ## 构建链
 
@@ -15,8 +23,8 @@
 执行：
 
 ```powershell
-dotnet restore tools\Stm32SerialLab\Stm32SerialLab.csproj -p:Platform=x64
-dotnet build tools\Stm32SerialLab\Stm32SerialLab.csproj -c Debug -p:Platform=x64
+dotnet restore .\Stm32SerialLab.csproj -p:Platform=x64
+dotnet build .\Stm32SerialLab.csproj -c Debug -p:Platform=x64
 ```
 
 `dotnet restore` 把 NuGet 依赖写入本机缓存，并生成 `obj/.../project.assets.json`。`dotnet build` 接着编译 C#、编译 XAML，并在下面的目录生成普通 unpackaged Windows 程序：
@@ -28,7 +36,7 @@ bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Stm32SerialLab.exe
 运行：
 
 ```powershell
-tools\Stm32SerialLab\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\Stm32SerialLab.exe
+.\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\Stm32SerialLab.exe
 ```
 
 ## Console
