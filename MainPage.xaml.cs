@@ -86,6 +86,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _serialPort.PortError += SerialPort_PortError;
         _demoTimer.Tick += DemoTimer_Tick;
         _plotTimer.Tick += PlotTimer_Tick;
+        ActualThemeChanged += MainPage_ActualThemeChanged;
     }
 
     public ObservableCollection<string> PortNames { get; } = [];
@@ -106,6 +107,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         _loaded = true;
+        UpdateThemeButton(ActualTheme);
         DisplayModeSelector.SelectedItem = AsciiModeItem;
         RefreshPorts();
         _plotTimer.Start();
@@ -636,8 +638,29 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void ThemeButton_Click(object sender, RoutedEventArgs e)
     {
-        RootLayout.RequestedTheme = RootLayout.ActualTheme == ElementTheme.Dark ? ElementTheme.Light : ElementTheme.Dark;
+        if (Application.Current is App { MainWindow: not null } app)
+        {
+            ElementTheme nextTheme = app.MainWindow.CurrentTheme == ElementTheme.Dark ? ElementTheme.Light : ElementTheme.Dark;
+            app.MainWindow.SetTheme(nextTheme);
+            return;
+        }
+
+        RequestedTheme = ActualTheme == ElementTheme.Dark ? ElementTheme.Light : ElementTheme.Dark;
+    }
+
+    private void MainPage_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        UpdateThemeButton(ActualTheme);
         RenderPlot();
+    }
+
+    private void UpdateThemeButton(ElementTheme activeTheme)
+    {
+        bool isDark = activeTheme == ElementTheme.Dark;
+        string action = isDark ? "Switch to light theme" : "Switch to dark theme";
+        ThemeButton.Content = CreateToolbarIcon(isDark ? "\uE706" : "\uE708");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ThemeButton, action);
+        ToolTipService.SetToolTip(ThemeButton, action);
     }
 
     private void PlotTimer_Tick(object? sender, object e)

@@ -122,11 +122,11 @@
                 x:Name="ThemeButton"
                 Grid.Column="7"
                 Width="40"
-                AutomationProperties.Name="Switch color theme"
+                AutomationProperties.Name="Switch to dark theme"
                 Click="ThemeButton_Click"
                 Padding="0"
-                ToolTipService.ToolTip="Switch light and dark theme">
-                <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Glyph="&#xE713;" />
+                ToolTipService.ToolTip="Switch to dark theme">
+                <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Glyph="&#xE708;" />
             </Button>
         </Grid>
 

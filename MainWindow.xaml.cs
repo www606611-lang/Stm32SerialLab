@@ -28,6 +28,13 @@ public sealed partial class MainWindow : Window
         RootFrame.Navigate(typeof(MainPage));
     }
 
+    public ElementTheme CurrentTheme => WindowRoot.ActualTheme;
+
+    public void SetTheme(ElementTheme theme)
+    {
+        WindowRoot.RequestedTheme = theme;
+    }
+
     private void FitWindowToCurrentDisplay()
     {
         DisplayArea display = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
