@@ -326,15 +326,15 @@
                                     x:Name="TimeWindowSlider"
                                     Width="132"
                                     AutomationProperties.Name="Scope time window"
-                                    Maximum="60"
-                                    Minimum="1"
+                                    Maximum="11"
+                                    Minimum="0"
                                     StepFrequency="1"
-                                    ToolTipService.ToolTip="Visible time window, in seconds"
-                                    Value="10"
+                                    ToolTipService.ToolTip="Visible time window: 100 ms to 300 s"
+                                    Value="6"
                                     ValueChanged="TimeWindowSlider_ValueChanged" />
                                 <TextBlock
                                     x:Name="TimeWindowText"
-                                    Width="38"
+                                    Width="52"
                                     VerticalAlignment="Center"
                                     Style="{StaticResource LabMonoTextStyle}"
                                     Text="10 s" />
@@ -344,11 +344,11 @@
                                     x:Name="VerticalGainSlider"
                                     Width="104"
                                     AutomationProperties.Name="Scope vertical gain"
-                                    Maximum="8"
-                                    Minimum="1"
-                                    StepFrequency="0.25"
-                                    ToolTipService.ToolTip="Vertical waveform magnification"
-                                    Value="1"
+                                    Maximum="6"
+                                    Minimum="0"
+                                    StepFrequency="1"
+                                    ToolTipService.ToolTip="Vertical waveform magnification: 1x to 64x"
+                                    Value="0"
                                     ValueChanged="VerticalGainSlider_ValueChanged" />
                                 <TextBlock
                                     x:Name="VerticalGainText"

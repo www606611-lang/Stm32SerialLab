@@ -30,6 +30,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     [
         "#0F766E", "#2563EB", "#DC2626", "#9333EA", "#CA8A04", "#0891B2", "#DB2777", "#4D7C0F"
     ];
+    private static readonly double[] TimeWindowSteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300];
+    private static readonly double[] VerticalGainSteps = [1, 2, 4, 8, 16, 32, 64];
 
     private readonly SerialPortService _serialPort = new();
     private readonly TelemetryParser _telemetryParser = new();
@@ -599,10 +601,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void TimeWindowSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        _timeWindowSeconds = e.NewValue;
+        int index = Math.Clamp((int)Math.Round(e.NewValue), 0, TimeWindowSteps.Length - 1);
+        _timeWindowSeconds = TimeWindowSteps[index];
         if (TimeWindowText is not null)
         {
-            TimeWindowText.Text = $"{_timeWindowSeconds:0} s";
+            TimeWindowText.Text = FormatTimeWindow(_timeWindowSeconds);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(TimeWindowSlider, $"Scope time window {TimeWindowText.Text}");
         }
 
         RenderPlot();
@@ -610,10 +614,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void VerticalGainSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        _verticalGain = e.NewValue;
+        int index = Math.Clamp((int)Math.Round(e.NewValue), 0, VerticalGainSteps.Length - 1);
+        _verticalGain = VerticalGainSteps[index];
         if (VerticalGainText is not null)
         {
-            VerticalGainText.Text = $"{_verticalGain:0.##}x";
+            VerticalGainText.Text = $"{_verticalGain:0}x";
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(VerticalGainSlider, $"Scope vertical gain {VerticalGainText.Text}");
         }
 
         RenderPlot();
@@ -638,8 +644,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void ScopeResetButton_Click(object sender, RoutedEventArgs e)
     {
-        TimeWindowSlider.Value = 10;
-        VerticalGainSlider.Value = 1;
+        TimeWindowSlider.Value = 6;
+        VerticalGainSlider.Value = 0;
         GoToLiveScope();
     }
 
@@ -648,13 +654,13 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         int delta = e.GetCurrentPoint(ScopeCanvas).Properties.MouseWheelDelta;
         if ((e.KeyModifiers & VirtualKeyModifiers.Control) != 0)
         {
-            double factor = delta > 0 ? 1.25 : 0.8;
-            VerticalGainSlider.Value = Math.Clamp(VerticalGainSlider.Value * factor, VerticalGainSlider.Minimum, VerticalGainSlider.Maximum);
+            double step = delta > 0 ? 1 : -1;
+            VerticalGainSlider.Value = Math.Clamp(VerticalGainSlider.Value + step, VerticalGainSlider.Minimum, VerticalGainSlider.Maximum);
         }
         else
         {
-            double factor = delta > 0 ? 0.8 : 1.25;
-            TimeWindowSlider.Value = Math.Clamp(TimeWindowSlider.Value * factor, TimeWindowSlider.Minimum, TimeWindowSlider.Maximum);
+            double step = delta > 0 ? -1 : 1;
+            TimeWindowSlider.Value = Math.Clamp(TimeWindowSlider.Value + step, TimeWindowSlider.Minimum, TimeWindowSlider.Maximum);
         }
 
         e.Handled = true;
@@ -815,7 +821,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         AddCanvasLabel(maxValue.ToString("0.###", CultureInfo.InvariantCulture), 4, top - 7, labelBrush);
         AddCanvasLabel(minValue.ToString("0.###", CultureInfo.InvariantCulture), 4, top + plotHeight - 8, labelBrush);
-        AddCanvasLabel($"-{windowSeconds:0} s", left, top + plotHeight + 8, labelBrush);
+        AddCanvasLabel($"-{FormatTimeWindow(windowSeconds)}", left, top + plotHeight + 8, labelBrush);
         AddCanvasLabel("now", left + plotWidth - 24, top + plotHeight + 8, labelBrush);
 
         foreach (TelemetryMetric metric in selected)
@@ -851,6 +857,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         Canvas.SetLeft(label, x);
         Canvas.SetTop(label, y);
         ScopeCanvas.Children.Add(label);
+    }
+
+    private static string FormatTimeWindow(double seconds)
+    {
+        return seconds < 1 ? $"{seconds * 1000:0} ms" : $"{seconds:0.#} s";
     }
 
     private void RefreshCounters()
