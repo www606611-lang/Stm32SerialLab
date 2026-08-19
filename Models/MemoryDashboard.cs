@@ -11,15 +11,32 @@ public readonly record struct MemoryHistorySample(
     uint HeapMinimumFree,
     uint HeapTotal);
 
+public sealed record MemoryRegionRow(
+    string Kind,
+    string Owner,
+    uint Start,
+    uint End,
+    string State)
+{
+    public uint Size => End >= Start ? End - Start : 0;
+    public string RangeText => Start == 0 && End == 0
+        ? "address pending"
+        : $"{MemoryDashboard.FormatAddress(Start)} - {MemoryDashboard.FormatAddress(End)}";
+    public string SizeText => MemoryDashboard.FormatBytes(Size);
+    public string DetailText => $"{Kind}  |  {State}";
+}
+
 public sealed class MemoryDashboard : INotifyPropertyChanged
 {
     private bool _hasData;
     private string _sourceLabel = "WAITING FOR MEMORY TELEMETRY";
     private DateTimeOffset _lastUpdated;
+    private MemorySnapshot? _snapshot;
 
     public bool HasData => _hasData;
     public string SourceLabel => _sourceLabel;
     public string LastUpdateText => _hasData ? $"Updated {_lastUpdated:HH:mm:ss}" : "No snapshot received";
+    public ObservableCollection<MemoryRegionRow> Regions { get; } = [];
     public ObservableCollection<TaskMemoryRow> Tasks { get; } = [];
     public ObservableCollection<ObjectMemoryRow> Objects { get; } = [];
 
@@ -62,6 +79,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         _hasData = true;
         _sourceLabel = sourceLabel;
         _lastUpdated = timestamp;
+        _snapshot = snapshot;
         FlashUsed = snapshot.FlashUsed;
         FlashCodeConst = snapshot.FlashCodeConst;
         FlashDataInit = snapshot.FlashDataInit;
@@ -86,6 +104,8 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         {
             item.SetHeapTotal(HeapTotal);
         }
+
+        RebuildRegions();
     }
 
     public void Apply(TaskMemorySnapshot snapshot)
@@ -99,6 +119,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         }
 
         row.Update(snapshot, HeapTotal);
+        RebuildRegions();
     }
 
     public void Apply(ObjectMemorySnapshot snapshot)
@@ -113,6 +134,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         }
 
         row.Update(snapshot, HeapTotal);
+        RebuildRegions();
     }
 
     public void Reset(string sourceLabel)
@@ -120,6 +142,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         _hasData = false;
         _sourceLabel = sourceLabel;
         _lastUpdated = default;
+        _snapshot = null;
         FlashUsed = 0;
         FlashCodeConst = 0;
         FlashDataInit = 0;
@@ -133,6 +156,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         HeapInitialFree = 0;
         HeapFree = 0;
         HeapMinimumFree = 0;
+        Regions.Clear();
         Tasks.Clear();
         Objects.Clear();
         NotifyOverviewChanged();
@@ -143,6 +167,53 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         return bytes >= 1024
             ? $"{bytes / 1024.0:0.##} KiB"
             : $"{bytes} B";
+    }
+
+    public static string FormatAddress(uint address)
+    {
+        return $"0x{address:X8}";
+    }
+
+    public static string FormatRange(uint start, uint end)
+    {
+        return start == 0 && end == 0
+            ? "address pending"
+            : $"{FormatAddress(start)} - {FormatAddress(end)}";
+    }
+
+    private void RebuildRegions()
+    {
+        Regions.Clear();
+        if (_snapshot is { } snapshot)
+        {
+            AddRegion("FLASH APP", "firmware code + const", snapshot.FlashAppStart, snapshot.FlashUsedEnd, "fixed");
+            AddRegion("PARAM FLASH", "reserved parameter page", snapshot.ParameterStart, snapshot.ParameterEnd, "fixed");
+            AddRegion("RAM .data", "initialized globals", snapshot.DataStart, snapshot.DataEnd, "fixed");
+            AddRegion("RAM .bss", "zero globals + kernel heap", snapshot.BssStart, snapshot.BssEnd, "fixed");
+            AddRegion("FREERTOS HEAP", "heap_4 pool", snapshot.HeapStart, snapshot.HeapEnd, "live free/min-free");
+        }
+
+        foreach (TaskMemoryRow task in Tasks)
+        {
+            AddRegion($"TCB {task.Name}", "task control block", task.TcbAddress, task.TcbAddress + task.TcbBytes, task.State);
+            AddRegion($"STACK {task.Name}", "task stack", task.StackStart, task.StackEnd, task.StackMarginText);
+        }
+
+        foreach (ObjectMemoryRow item in Objects)
+        {
+            AddRegion($"{item.KindText} CTRL {item.Name}", "kernel object", item.HandleAddress, item.HandleAddress + item.StructBytes, item.HeapAllocationText);
+            AddRegion($"{item.KindText} DATA {item.Name}", "payload storage", item.StorageAddress, item.StorageEnd, item.LiveStateText);
+        }
+    }
+
+    private void AddRegion(string kind, string owner, uint start, uint end, string state)
+    {
+        if (start == 0 && end == 0)
+        {
+            return;
+        }
+
+        Regions.Add(new MemoryRegionRow(kind, owner, start, end, state));
     }
 
     private static string FormatPercent(uint value, uint total)
@@ -208,13 +279,19 @@ public sealed class TaskMemoryRow : INotifyPropertyChanged
     public uint HeapAllocated { get; private set; }
     public uint Priority { get; private set; }
     public string State { get; private set; } = "UNKNOWN";
+    public uint TcbAddress { get; private set; }
+    public uint TcbBytes { get; private set; }
+    public uint StackStart { get; private set; }
+    public uint StackEnd { get; private set; }
     public uint StackPeakUsed => StackAllocated >= StackMinimumFree ? StackAllocated - StackMinimumFree : 0;
     public double StackUsagePercent => StackAllocated == 0 ? 0 : StackPeakUsed * 100.0 / StackAllocated;
     public double HeapSharePercent => HeapAllocated * 100.0 / Math.Max(1, _heapTotal);
     public string StackUsageText => $"peak {MemoryDashboard.FormatBytes(StackPeakUsed)} / {MemoryDashboard.FormatBytes(StackAllocated)}";
     public string StackMarginText => $"{MemoryDashboard.FormatBytes(StackMinimumFree)} min free";
     public string HeapAllocationText => $"{MemoryDashboard.FormatBytes(HeapAllocated)} heap block";
-    public string PriorityText => $"P{Priority}";
+    public string PriorityText => $"P{Priority}  {State}";
+    public string TcbAddressText => $"TCB  {MemoryDashboard.FormatRange(TcbAddress, TcbAddress + TcbBytes)}";
+    public string StackAddressText => $"STACK  {MemoryDashboard.FormatRange(StackStart, StackEnd)}";
     public string MarginStatus => StackAllocated == 0
         ? "UNKNOWN"
         : StackMinimumFree * 10U <= StackAllocated
@@ -232,6 +309,10 @@ public sealed class TaskMemoryRow : INotifyPropertyChanged
         HeapAllocated = snapshot.HeapAllocated;
         Priority = snapshot.Priority;
         State = snapshot.State;
+        TcbAddress = snapshot.TcbAddress;
+        TcbBytes = snapshot.TcbBytes;
+        StackStart = snapshot.StackStart;
+        StackEnd = snapshot.StackEnd;
         _heapTotal = Math.Max(1, heapTotal);
         NotifyChanged();
     }
@@ -249,6 +330,10 @@ public sealed class TaskMemoryRow : INotifyPropertyChanged
         OnPropertyChanged(nameof(HeapAllocated));
         OnPropertyChanged(nameof(Priority));
         OnPropertyChanged(nameof(State));
+        OnPropertyChanged(nameof(TcbAddress));
+        OnPropertyChanged(nameof(TcbBytes));
+        OnPropertyChanged(nameof(StackStart));
+        OnPropertyChanged(nameof(StackEnd));
         OnPropertyChanged(nameof(StackPeakUsed));
         OnPropertyChanged(nameof(StackUsagePercent));
         OnPropertyChanged(nameof(HeapSharePercent));
@@ -256,6 +341,8 @@ public sealed class TaskMemoryRow : INotifyPropertyChanged
         OnPropertyChanged(nameof(StackMarginText));
         OnPropertyChanged(nameof(HeapAllocationText));
         OnPropertyChanged(nameof(PriorityText));
+        OnPropertyChanged(nameof(TcbAddressText));
+        OnPropertyChanged(nameof(StackAddressText));
         OnPropertyChanged(nameof(MarginStatus));
     }
 
@@ -282,6 +369,10 @@ public sealed class ObjectMemoryRow : INotifyPropertyChanged
     public uint Capacity { get; private set; }
     public uint Depth { get; private set; }
     public uint ItemSize { get; private set; }
+    public uint HandleAddress { get; private set; }
+    public uint StorageAddress { get; private set; }
+    public uint StorageEnd { get; private set; }
+    public uint StructBytes { get; private set; }
     public double HeapSharePercent => HeapAllocated * 100.0 / Math.Max(1, _heapTotal);
     public string KindText => Kind.ToUpperInvariant();
     public string HeapAllocationText => $"{MemoryDashboard.FormatBytes(HeapAllocated)} heap block";
@@ -291,6 +382,8 @@ public sealed class ObjectMemoryRow : INotifyPropertyChanged
     public string LiveStateText => Kind.Equals("queue", StringComparison.OrdinalIgnoreCase)
         ? $"{Depth} / {Capacity} messages"
         : "reserved at heap initialization";
+    public string HandleAddressText => $"CTRL  {MemoryDashboard.FormatAddress(HandleAddress)}";
+    public string StorageAddressText => $"DATA  {MemoryDashboard.FormatRange(StorageAddress, StorageEnd)}";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -301,6 +394,10 @@ public sealed class ObjectMemoryRow : INotifyPropertyChanged
         Capacity = snapshot.Capacity;
         Depth = snapshot.Depth;
         ItemSize = snapshot.ItemSize;
+        HandleAddress = snapshot.HandleAddress;
+        StorageAddress = snapshot.StorageAddress;
+        StorageEnd = snapshot.StorageEnd;
+        StructBytes = snapshot.StructBytes;
         _heapTotal = Math.Max(1, heapTotal);
         NotifyChanged();
     }
@@ -318,10 +415,16 @@ public sealed class ObjectMemoryRow : INotifyPropertyChanged
         OnPropertyChanged(nameof(Capacity));
         OnPropertyChanged(nameof(Depth));
         OnPropertyChanged(nameof(ItemSize));
+        OnPropertyChanged(nameof(HandleAddress));
+        OnPropertyChanged(nameof(StorageAddress));
+        OnPropertyChanged(nameof(StorageEnd));
+        OnPropertyChanged(nameof(StructBytes));
         OnPropertyChanged(nameof(HeapSharePercent));
         OnPropertyChanged(nameof(HeapAllocationText));
         OnPropertyChanged(nameof(PayloadText));
         OnPropertyChanged(nameof(LiveStateText));
+        OnPropertyChanged(nameof(HandleAddressText));
+        OnPropertyChanged(nameof(StorageAddressText));
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)

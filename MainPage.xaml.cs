@@ -312,13 +312,13 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _demoHeapMinimumFree = Math.Min(_demoHeapMinimumFree, heapFree);
 
         string telemetry =
-            $"@mem flash_used=13412 flash_code_const=13408 flash_data_init=4 flash_app_total=64512 flash_parameter=1024 ram_static=6552 ram_data=4 ram_bss=6548 ram_total=20480 heap_total=6144 heap_initial_free=6128 heap_free={heapFree} heap_min_free={_demoHeapMinimumFree}\r\n" +
-            "@task name=SENSOR stack_alloc=512 stack_min_free=356 heap_alloc=616 priority=1 state=BLOCKED\r\n" +
-            "@task name=CONTROL stack_alloc=512 stack_min_free=348 heap_alloc=616 priority=1 state=BLOCKED\r\n" +
-            $"@task name=ROUTER stack_alloc=512 stack_min_free={routerStackFree} heap_alloc=616 priority=2 state=RUNNING\r\n" +
-            "@task name=IDLE stack_alloc=512 stack_min_free=400 heap_alloc=616 priority=0 state=READY\r\n" +
-            $"@object kind=queue name=EVENT_QUEUE heap_alloc=216 payload_alloc=128 capacity=8 depth={queueDepth} item_size=16\r\n" +
-            "@object kind=allocator name=HEAP4_METADATA heap_alloc=16 payload_alloc=0 capacity=0 depth=0 item_size=0\r\n";
+            $"@mem flash_app_start=134217728 flash_used_end=134232160 flash_app_end=134282240 param_start=134282240 param_end=134283264 flash_used=14432 flash_code_const=14428 flash_data_init=4 flash_app_total=64512 flash_parameter=1024 ram_static=6568 ram_data=4 ram_bss=6564 ram_total=20480 data_start=536870912 data_end=536870916 bss_start=536870916 bss_end=536877480 heap_start=536870940 heap_end=536877084 heap_total=6144 heap_initial_free=6128 heap_free={heapFree} heap_min_free={_demoHeapMinimumFree}\r\n" +
+            "@task name=SENSOR stack_alloc=512 stack_min_free=356 heap_alloc=616 priority=1 state=BLOCKED tcb_addr=536871172 tcb_bytes=104 stack_start=536871276 stack_end=536871788\r\n" +
+            "@task name=CONTROL stack_alloc=512 stack_min_free=348 heap_alloc=616 priority=1 state=BLOCKED tcb_addr=536871788 tcb_bytes=104 stack_start=536871892 stack_end=536872404\r\n" +
+            $"@task name=ROUTER stack_alloc=512 stack_min_free={routerStackFree} heap_alloc=616 priority=2 state=RUNNING tcb_addr=536872404 tcb_bytes=104 stack_start=536872508 stack_end=536873020\r\n" +
+            "@task name=IDLE stack_alloc=512 stack_min_free=400 heap_alloc=616 priority=0 state=READY tcb_addr=536873020 tcb_bytes=104 stack_start=536873124 stack_end=536873636\r\n" +
+            $"@object kind=queue name=EVENT_QUEUE handle_addr=536870956 storage_addr=536871044 storage_end=536871172 struct_bytes=88 heap_alloc=216 payload_alloc=128 capacity=8 depth={queueDepth} item_size=16\r\n" +
+            "@object kind=allocator name=HEAP4_METADATA handle_addr=536870940 storage_addr=536870940 storage_end=536870956 struct_bytes=16 heap_alloc=16 payload_alloc=0 capacity=0 depth=0 item_size=0\r\n";
         ProcessReceivedBytes(Encoding.ASCII.GetBytes(telemetry), SerialDirection.Demo);
     }
 

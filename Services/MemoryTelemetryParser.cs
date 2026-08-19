@@ -15,7 +15,18 @@ public sealed record MemorySnapshot(
     uint HeapTotal,
     uint HeapInitialFree,
     uint HeapFree,
-    uint HeapMinimumFree);
+    uint HeapMinimumFree,
+    uint FlashAppStart = 0,
+    uint FlashUsedEnd = 0,
+    uint FlashAppEnd = 0,
+    uint ParameterStart = 0,
+    uint ParameterEnd = 0,
+    uint DataStart = 0,
+    uint DataEnd = 0,
+    uint BssStart = 0,
+    uint BssEnd = 0,
+    uint HeapStart = 0,
+    uint HeapEnd = 0);
 
 public sealed record TaskMemorySnapshot(
     string Name,
@@ -23,7 +34,11 @@ public sealed record TaskMemorySnapshot(
     uint StackMinimumFree,
     uint HeapAllocated,
     uint Priority,
-    string State);
+    string State,
+    uint TcbAddress = 0,
+    uint TcbBytes = 0,
+    uint StackStart = 0,
+    uint StackEnd = 0);
 
 public sealed record ObjectMemorySnapshot(
     string Kind,
@@ -32,7 +47,11 @@ public sealed record ObjectMemorySnapshot(
     uint PayloadAllocated,
     uint Capacity,
     uint Depth,
-    uint ItemSize);
+    uint ItemSize,
+    uint HandleAddress = 0,
+    uint StorageAddress = 0,
+    uint StorageEnd = 0,
+    uint StructBytes = 0);
 
 public readonly record struct MemoryTelemetryParseResult(
     bool IsMemoryTelemetry,
@@ -89,6 +108,18 @@ public sealed class MemoryTelemetryParser
             return ErrorResult();
         }
 
+        TryGetUInt(fields, "flash_app_start", out uint flashAppStart);
+        TryGetUInt(fields, "flash_used_end", out uint flashUsedEnd);
+        TryGetUInt(fields, "flash_app_end", out uint flashAppEnd);
+        TryGetUInt(fields, "param_start", out uint parameterStart);
+        TryGetUInt(fields, "param_end", out uint parameterEnd);
+        TryGetUInt(fields, "data_start", out uint dataStart);
+        TryGetUInt(fields, "data_end", out uint dataEnd);
+        TryGetUInt(fields, "bss_start", out uint bssStart);
+        TryGetUInt(fields, "bss_end", out uint bssEnd);
+        TryGetUInt(fields, "heap_start", out uint heapStart);
+        TryGetUInt(fields, "heap_end", out uint heapEnd);
+
         MemorySnapshot snapshot = new(
             flashUsed,
             flashCodeConst,
@@ -102,7 +133,18 @@ public sealed class MemoryTelemetryParser
             heapTotal,
             heapInitialFree,
             heapFree,
-            heapMinimumFree);
+            heapMinimumFree,
+            flashAppStart,
+            flashUsedEnd,
+            flashAppEnd,
+            parameterStart,
+            parameterEnd,
+            dataStart,
+            dataEnd,
+            bssStart,
+            bssEnd,
+            heapStart,
+            heapEnd);
         return new MemoryTelemetryParseResult(true, false, snapshot, null, null);
     }
 
@@ -120,13 +162,22 @@ public sealed class MemoryTelemetryParser
             return ErrorResult();
         }
 
+        TryGetUInt(fields, "tcb_addr", out uint tcbAddress);
+        TryGetUInt(fields, "tcb_bytes", out uint tcbBytes);
+        TryGetUInt(fields, "stack_start", out uint stackStart);
+        TryGetUInt(fields, "stack_end", out uint stackEnd);
+
         TaskMemorySnapshot snapshot = new(
             name,
             stackAllocated,
             stackMinimumFree,
             heapAllocated,
             priority,
-            state);
+            state,
+            tcbAddress,
+            tcbBytes,
+            stackStart,
+            stackEnd);
         return new MemoryTelemetryParseResult(true, false, null, snapshot, null);
     }
 
@@ -145,6 +196,11 @@ public sealed class MemoryTelemetryParser
             return ErrorResult();
         }
 
+        TryGetUInt(fields, "handle_addr", out uint handleAddress);
+        TryGetUInt(fields, "storage_addr", out uint storageAddress);
+        TryGetUInt(fields, "storage_end", out uint storageEnd);
+        TryGetUInt(fields, "struct_bytes", out uint structBytes);
+
         ObjectMemorySnapshot snapshot = new(
             kind,
             name,
@@ -152,7 +208,11 @@ public sealed class MemoryTelemetryParser
             payloadAllocated,
             capacity,
             depth,
-            itemSize);
+            itemSize,
+            handleAddress,
+            storageAddress,
+            storageEnd,
+            structBytes);
         return new MemoryTelemetryParseResult(true, false, null, null, snapshot);
     }
 

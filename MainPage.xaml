@@ -562,6 +562,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="190" />
                         <RowDefinition Height="210" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
@@ -617,11 +618,69 @@
                     <Grid Grid.Row="2" RowSpacing="4">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="28" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="12">
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="Address map" />
+                            <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="ranges use an exclusive end address" />
+                        </Grid>
+                        <Grid Grid.Row="1" Padding="2,4" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="1.2*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock FontWeight="SemiBold" Text="Region" />
+                            <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="Owner" />
+                            <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="Address range" />
+                            <TextBlock Grid.Column="3" HorizontalAlignment="Right" FontWeight="SemiBold" Text="Size" />
+                            <TextBlock Grid.Column="4" FontWeight="SemiBold" Text="State" />
+                        </Grid>
+                        <ListView
+                            Grid.Row="2"
+                            ItemsSource="{x:Bind Memory.Regions}"
+                            ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                            ScrollViewer.VerticalScrollBarVisibility="Auto"
+                            SelectionMode="None">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="MinHeight" Value="34" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="models:MemoryRegionRow">
+                                    <Grid Padding="2,5" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="160" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="1.2*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontWeight="SemiBold" Text="{x:Bind Kind}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Owner}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind RangeText}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="3" HorizontalAlignment="Right" Style="{StaticResource MetricValueStyle}" Text="{x:Bind SizeText}" />
+                                        <TextBlock Grid.Column="4" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind State}" TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+
+                    <Grid Grid.Row="3" RowSpacing="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <Grid ColumnSpacing="12">
                             <TextBlock FontSize="15" FontWeight="SemiBold" Text="Heap history" />
-                            <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="green free  |  amber minimum-ever free" />
+                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="green free  |  amber minimum-ever free" />
                         </Grid>
                         <Canvas
                             x:Name="MemoryCanvas"
@@ -630,7 +689,7 @@
                             SizeChanged="MemoryCanvas_SizeChanged" />
                     </Grid>
 
-                    <Grid Grid.Row="3" ColumnSpacing="14">
+                    <Grid Grid.Row="4" ColumnSpacing="14">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.1*" />
                             <ColumnDefinition Width="0.9*" />
@@ -653,19 +712,24 @@
                                     <DataTemplate x:DataType="models:TaskMemoryRow">
                                         <Grid Padding="2,5" ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="96" />
+                                                <ColumnDefinition Width="116" />
+                                                <ColumnDefinition Width="190" />
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="112" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Spacing="1">
                                                 <TextBlock FontWeight="SemiBold" Text="{x:Bind Name}" />
                                                 <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind PriorityText}" />
                                             </StackPanel>
-                                            <StackPanel Grid.Column="1" Spacing="3">
+                                            <StackPanel Grid.Column="1" Spacing="1">
+                                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind StackAddressText}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind TcbAddressText}" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Spacing="3">
                                                 <ProgressBar Maximum="100" Value="{x:Bind StackUsagePercent, Mode=OneWay}" />
                                                 <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind StackUsageText}" />
                                             </StackPanel>
-                                            <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="1">
+                                            <StackPanel Grid.Column="3" HorizontalAlignment="Right" Spacing="1">
                                                 <TextBlock HorizontalAlignment="Right" Text="{x:Bind MarginStatus}" />
                                                 <TextBlock HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind StackMarginText}" />
                                             </StackPanel>
@@ -693,14 +757,19 @@
                                         <Grid Padding="2,5" ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="220" />
+                                                <ColumnDefinition Width="180" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Spacing="1">
                                                 <TextBlock FontWeight="SemiBold" Text="{x:Bind Name}" />
                                                 <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind PayloadText}" TextTrimming="CharacterEllipsis" />
                                                 <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind LiveStateText}" />
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource MetricValueStyle}" Text="{x:Bind HeapAllocationText}" />
+                                            <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind HandleAddressText}" TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="1">
+                                                <TextBlock HorizontalAlignment="Right" Style="{StaticResource MetricValueStyle}" Text="{x:Bind HeapAllocationText}" />
+                                                <TextBlock HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind StorageAddressText}" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
                                         </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
