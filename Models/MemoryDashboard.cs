@@ -11,19 +11,56 @@ public readonly record struct MemoryHistorySample(
     uint HeapMinimumFree,
     uint HeapTotal);
 
-public sealed record MemoryRegionRow(
-    string Kind,
-    string Owner,
-    uint Start,
-    uint End,
-    string State)
+public sealed class MemoryRegionRow : INotifyPropertyChanged
 {
+    public MemoryRegionRow(string kind, string owner, uint start, uint end, string state)
+    {
+        Kind = kind;
+        Owner = owner;
+        Start = start;
+        End = end;
+        State = state;
+    }
+
+    public string Kind { get; }
+    public string Owner { get; private set; }
+    public uint Start { get; private set; }
+    public uint End { get; private set; }
+    public string State { get; private set; }
     public uint Size => End >= Start ? End - Start : 0;
     public string RangeText => Start == 0 && End == 0
         ? "address pending"
         : $"{MemoryDashboard.FormatAddress(Start)} - {MemoryDashboard.FormatAddress(End)}";
     public string SizeText => MemoryDashboard.FormatBytes(Size);
     public string DetailText => $"{Kind}  |  {State}";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void Update(string owner, uint start, uint end, string state)
+    {
+        if (Owner == owner && Start == start && End == end && State == state)
+        {
+            return;
+        }
+
+        Owner = owner;
+        Start = start;
+        End = end;
+        State = state;
+        OnPropertyChanged(nameof(Owner));
+        OnPropertyChanged(nameof(Start));
+        OnPropertyChanged(nameof(End));
+        OnPropertyChanged(nameof(State));
+        OnPropertyChanged(nameof(Size));
+        OnPropertyChanged(nameof(RangeText));
+        OnPropertyChanged(nameof(SizeText));
+        OnPropertyChanged(nameof(DetailText));
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public sealed class MemoryDashboard : INotifyPropertyChanged
@@ -32,6 +69,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
     private string _sourceLabel = "WAITING FOR MEMORY TELEMETRY";
     private DateTimeOffset _lastUpdated;
     private MemorySnapshot? _snapshot;
+    private readonly Dictionary<string, MemoryRegionRow> _regionsByKind = new(StringComparer.OrdinalIgnoreCase);
 
     public bool HasData => _hasData;
     public string SourceLabel => _sourceLabel;
@@ -156,6 +194,7 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         HeapInitialFree = 0;
         HeapFree = 0;
         HeapMinimumFree = 0;
+        _regionsByKind.Clear();
         Regions.Clear();
         Tasks.Clear();
         Objects.Clear();
@@ -183,37 +222,44 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
 
     private void RebuildRegions()
     {
-        Regions.Clear();
         if (_snapshot is { } snapshot)
         {
-            AddRegion("FLASH APP", "firmware code + const", snapshot.FlashAppStart, snapshot.FlashUsedEnd, "fixed");
-            AddRegion("PARAM FLASH", "reserved parameter page", snapshot.ParameterStart, snapshot.ParameterEnd, "fixed");
-            AddRegion("RAM .data", "initialized globals", snapshot.DataStart, snapshot.DataEnd, "fixed");
-            AddRegion("RAM .bss", "zero globals + kernel heap", snapshot.BssStart, snapshot.BssEnd, "fixed");
-            AddRegion("FREERTOS HEAP", "heap_4 pool", snapshot.HeapStart, snapshot.HeapEnd, "live free/min-free");
+            UpsertRegion("FLASH APP", "firmware code + const", snapshot.FlashAppStart, snapshot.FlashUsedEnd, "fixed");
+            UpsertRegion("PARAM FLASH", "reserved parameter page", snapshot.ParameterStart, snapshot.ParameterEnd, "fixed");
+            UpsertRegion("RAM .data", "initialized globals", snapshot.DataStart, snapshot.DataEnd, "fixed");
+            UpsertRegion("RAM .bss", "zero globals + kernel heap", snapshot.BssStart, snapshot.BssEnd, "fixed");
+            UpsertRegion("FREERTOS HEAP", "heap_4 pool", snapshot.HeapStart, snapshot.HeapEnd, "live free shown below");
         }
 
         foreach (TaskMemoryRow task in Tasks)
         {
-            AddRegion($"TCB {task.Name}", "task control block", task.TcbAddress, task.TcbAddress + task.TcbBytes, task.State);
-            AddRegion($"STACK {task.Name}", "task stack", task.StackStart, task.StackEnd, task.StackMarginText);
+            UpsertRegion($"TCB {task.Name}", "task control block", task.TcbAddress, task.TcbAddress + task.TcbBytes, task.State);
+            UpsertRegion($"STACK {task.Name}", "task stack", task.StackStart, task.StackEnd, task.StackMarginText);
         }
 
         foreach (ObjectMemoryRow item in Objects)
         {
-            AddRegion($"{item.KindText} CTRL {item.Name}", "kernel object", item.HandleAddress, item.HandleAddress + item.StructBytes, item.HeapAllocationText);
-            AddRegion($"{item.KindText} DATA {item.Name}", "payload storage", item.StorageAddress, item.StorageEnd, item.LiveStateText);
+            UpsertRegion($"{item.KindText} CTRL {item.Name}", "kernel object", item.HandleAddress, item.HandleAddress + item.StructBytes, item.HeapAllocationText);
+            UpsertRegion($"{item.KindText} DATA {item.Name}", "payload storage", item.StorageAddress, item.StorageEnd, item.LiveStateText);
         }
     }
 
-    private void AddRegion(string kind, string owner, uint start, uint end, string state)
+    private void UpsertRegion(string kind, string owner, uint start, uint end, string state)
     {
         if (start == 0 && end == 0)
         {
             return;
         }
 
-        Regions.Add(new MemoryRegionRow(kind, owner, start, end, state));
+        if (_regionsByKind.TryGetValue(kind, out MemoryRegionRow? region))
+        {
+            region.Update(owner, start, end, state);
+            return;
+        }
+
+        region = new MemoryRegionRow(kind, owner, start, end, state);
+        _regionsByKind.Add(kind, region);
+        Regions.Add(region);
     }
 
     private static string FormatPercent(uint value, uint total)

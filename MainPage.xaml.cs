@@ -956,10 +956,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             RenderPlot();
         }
-        else if (IsMemoryTabSelected)
-        {
-            RenderMemoryChart();
-        }
     }
 
     private void ScopeCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -1352,14 +1348,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         PointCollection freePoints = [];
-        PointCollection minimumPoints = [];
         for (int index = 0; index < samples.Length; index++)
         {
             double x = left + plotWidth * index / (samples.Length - 1.0);
             double freeY = top + plotHeight * (1 - Math.Clamp(samples[index].HeapFree / (double)chartMaximum, 0, 1));
-            double minimumY = top + plotHeight * (1 - Math.Clamp(samples[index].HeapMinimumFree / (double)chartMaximum, 0, 1));
             freePoints.Add(new Point(x, freeY));
-            minimumPoints.Add(new Point(x, minimumY));
         }
 
         Rect clip = new(left, top, plotWidth, plotHeight);
@@ -1368,14 +1361,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             Points = freePoints,
             Stroke = new SolidColorBrush(ColorHelper.FromArgb(255, 16, 185, 129)),
             StrokeThickness = 2,
-            StrokeLineJoin = PenLineJoin.Round,
-            Clip = new RectangleGeometry { Rect = clip }
-        });
-        MemoryCanvas.Children.Add(new Polyline
-        {
-            Points = minimumPoints,
-            Stroke = new SolidColorBrush(ColorHelper.FromArgb(255, 245, 158, 11)),
-            StrokeThickness = 1.6,
             StrokeLineJoin = PenLineJoin.Round,
             Clip = new RectangleGeometry { Rect = clip }
         });

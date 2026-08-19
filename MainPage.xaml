@@ -663,10 +663,10 @@
                                             <ColumnDefinition Width="1.2*" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock FontWeight="SemiBold" Text="{x:Bind Kind}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Owner}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="2" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind RangeText}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="3" HorizontalAlignment="Right" Style="{StaticResource MetricValueStyle}" Text="{x:Bind SizeText}" />
-                                        <TextBlock Grid.Column="4" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind State}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Owner, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind RangeText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="3" HorizontalAlignment="Right" Style="{StaticResource MetricValueStyle}" Text="{x:Bind SizeText, Mode=OneWay}" />
+                                        <TextBlock Grid.Column="4" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind State, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -680,7 +680,7 @@
                         </Grid.RowDefinitions>
                         <Grid ColumnSpacing="12">
                             <TextBlock FontSize="15" FontWeight="SemiBold" Text="Heap history" />
-                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="green free  |  amber minimum-ever free" />
+                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="current free heap over time" />
                         </Grid>
                         <Canvas
                             x:Name="MemoryCanvas"
