@@ -68,6 +68,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool _serialOperationInProgress;
     private bool _countersDirty;
     private bool _memoryVisualDirty;
+    private string? _memoryChartSignature;
+    private double _memoryChartWidth;
+    private double _memoryChartHeight;
+    private ElementTheme _memoryChartTheme;
     private ItemsStackPanel? _logItemsPanel;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
@@ -453,6 +457,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         Memory.Reset(sourceLabel);
         _memoryVisualDirty = true;
+        _memoryChartSignature = null;
+        if (MemoryBlockHoverText is not null)
+        {
+            MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
+        }
     }
 
     private TelemetryMetric GetOrCreateMetric(string name)
@@ -1298,8 +1307,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
-        MemoryCanvas.Children.Clear();
         double width = MemoryCanvas.ActualWidth;
+        double height = MemoryCanvas.ActualHeight;
         const double left = 12;
         const double right = 12;
         const double top = 25;
@@ -1316,9 +1325,49 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         uint heapEnd = Memory.HeapEnd;
         if (heapStart == 0 || heapEnd <= heapStart)
         {
+            if (_memoryChartSignature == "empty" &&
+                _memoryChartWidth == width &&
+                _memoryChartHeight == height &&
+                _memoryChartTheme == RootLayout.ActualTheme)
+            {
+                return;
+            }
+
+            _memoryChartSignature = "empty";
+            _memoryChartWidth = width;
+            _memoryChartHeight = height;
+            _memoryChartTheme = RootLayout.ActualTheme;
+            MemoryCanvas.Children.Clear();
+            MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
             AddMemoryCanvasLabel("Waiting for heap address telemetry", left, top + 8, labelBrush);
             return;
         }
+
+        MemoryRegionRow[] blocks = Memory.Regions
+            .Where(region =>
+                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
+                region.Start >= heapStart &&
+                region.End <= heapEnd &&
+                region.End > region.Start)
+            .OrderBy(region => region.Start)
+            .ThenBy(region => region.End)
+            .ToArray();
+        string signature = $"{heapStart:X8}:{heapEnd:X8}|" + string.Join("|", blocks.Select(block =>
+            $"{block.Kind}:{block.Owner}:{block.Start:X8}:{block.End:X8}"));
+        if (_memoryChartSignature == signature &&
+            _memoryChartWidth == width &&
+            _memoryChartHeight == height &&
+            _memoryChartTheme == RootLayout.ActualTheme)
+        {
+            return;
+        }
+
+        _memoryChartSignature = signature;
+        _memoryChartWidth = width;
+        _memoryChartHeight = height;
+        _memoryChartTheme = RootLayout.ActualTheme;
+        MemoryCanvas.Children.Clear();
+        MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
 
         AddMemoryCanvasLabel(MemoryDashboard.FormatAddress(heapStart), left, 3, labelBrush);
         TextBlock endLabel = CreateMemoryCanvasLabel(MemoryDashboard.FormatAddress(heapEnd), labelBrush);
@@ -1339,15 +1388,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         Canvas.SetTop(heapBar, top);
         MemoryCanvas.Children.Add(heapBar);
 
-        MemoryRegionRow[] blocks = Memory.Regions
-            .Where(region =>
-                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
-                region.Start >= heapStart &&
-                region.End <= heapEnd &&
-                region.End > region.Start)
-            .OrderBy(region => region.Start)
-            .ThenBy(region => region.End)
-            .ToArray();
         string[] blockPalette =
         [
             "#2563EB", "#0F766E", "#9333EA", "#DC2626", "#0891B2", "#4D7C0F",
@@ -1370,7 +1410,18 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 Stroke = new SolidColorBrush(ColorHelper.FromArgb(150, 255, 255, 255)),
                 StrokeThickness = 0.5
             };
-            ToolTipService.SetToolTip(segment, $"{block.Kind}\n{block.RangeText}\n{block.SizeText}");
+            string hoverText = FormatMemoryBlockHoverText(block);
+            ToolTip tooltip = new()
+            {
+                Content = new TextBlock
+                {
+                    Text = hoverText,
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+            ToolTipService.SetToolTip(segment, tooltip);
+            segment.PointerEntered += (_, _) => MemoryBlockHoverText.Text = hoverText;
+            segment.PointerExited += (_, _) => MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
             Canvas.SetLeft(segment, x);
             Canvas.SetTop(segment, top);
             MemoryCanvas.Children.Add(segment);
@@ -1391,6 +1442,16 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             Canvas.SetTop(legend, legendY);
             MemoryCanvas.Children.Add(legend);
         }
+    }
+
+    private static string FormatMemoryBlockHoverText(MemoryRegionRow block)
+    {
+        return $"{block.Kind}  |  {block.Owner}\n{block.RangeText}  |  {block.SizeText}";
+    }
+
+    private static string GetDefaultMemoryBlockHoverText()
+    {
+        return "colored = known object  |  gray = free or allocator overhead";
     }
 
     private TextBlock CreateMemoryCanvasLabel(string text, Brush foreground)
