@@ -61,6 +61,7 @@
                 AutomationProperties.Name="Serial port"
                 ItemsSource="{x:Bind PortNames}"
                 PlaceholderText="COM port"
+                SelectionChanged="PortComboBox_SelectionChanged"
                 Style="{StaticResource CompactComboBoxStyle}"
                 ToolTipService.ToolTip="Serial port" />
             <ComboBox
@@ -69,6 +70,7 @@
                 Width="108"
                 AutomationProperties.Name="Baud rate"
                 SelectedIndex="4"
+                SelectionChanged="BaudComboBox_SelectionChanged"
                 Style="{StaticResource CompactComboBoxStyle}"
                 ToolTipService.ToolTip="Baud rate">
                 <x:String>9600</x:String>
@@ -277,6 +279,7 @@
                                 Width="78"
                                 AutomationProperties.Name="Send format"
                                 SelectedIndex="0"
+                                SelectionChanged="SendModeComboBox_SelectionChanged"
                                 Style="{StaticResource CompactComboBoxStyle}">
                                 <x:String>Text</x:String>
                                 <x:String>HEX</x:String>
@@ -293,6 +296,7 @@
                                 Width="86"
                                 AutomationProperties.Name="Line ending"
                                 SelectedIndex="2"
+                                SelectionChanged="LineEndingComboBox_SelectionChanged"
                                 Style="{StaticResource CompactComboBoxStyle}">
                                 <x:String>None</x:String>
                                 <x:String>\n</x:String>

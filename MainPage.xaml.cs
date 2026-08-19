@@ -45,6 +45,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private static readonly double[] VerticalGainSteps = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64];
 
     private readonly SerialPortService _serialPort = new();
+    private readonly AppSettingsService _settings = AppSettingsService.Current;
     private readonly TelemetryParser _telemetryParser = new();
     private readonly MemoryTelemetryParser _memoryTelemetryParser = new();
     private readonly Queue<SerialLogEntry> _allLogs = [];
@@ -59,6 +60,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private readonly Stopwatch _demoClock = new();
     private readonly Random _random = new();
     private bool _loaded;
+    private bool _settingsReady;
+    private bool _refreshingPorts;
     private bool _displayHex;
     private bool _autoYInitialized;
     private bool _manualYInitialized;
@@ -139,12 +142,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         _loaded = true;
         UpdateThemeButton(ActualTheme);
-        DisplayModeSelector.SelectedItem = AsciiModeItem;
         RefreshPorts();
+        RestoreSettings();
         _plotTimer.Start();
         _uiRefreshTimer.Start();
-        DemoToggle.IsChecked = true;
-        SetDemoMode(true);
+        SetDemoMode(DemoToggle.IsChecked == true);
+        _settingsReady = true;
         SendTextBox.Focus(FocusState.Programmatic);
     }
 
@@ -163,23 +166,115 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void RefreshPorts()
     {
-        string? previous = PortComboBox.SelectedItem as string;
-        PortNames.Clear();
-        foreach (string portName in SerialPortService.GetPortNames())
+        _refreshingPorts = true;
+        try
         {
-            PortNames.Add(portName);
+            string? previous = PortComboBox.SelectedItem as string;
+            PortNames.Clear();
+            foreach (string portName in SerialPortService.GetPortNames())
+            {
+                PortNames.Add(portName);
+            }
+
+            string? saved = PortNames.FirstOrDefault(
+                item => string.Equals(item, _settings.Values.SerialPort, StringComparison.OrdinalIgnoreCase));
+            if (saved is not null)
+            {
+                PortComboBox.SelectedItem = saved;
+            }
+            else if (previous is not null && PortNames.Contains(previous))
+            {
+                PortComboBox.SelectedItem = previous;
+            }
+            else if (PortNames.Count > 0)
+            {
+                PortComboBox.SelectedIndex = 0;
+            }
+
+            TransientStatusText.Text = PortNames.Count == 0 ? "No COM ports" : $"{PortNames.Count} port(s)";
+        }
+        finally
+        {
+            _refreshingPorts = false;
+        }
+    }
+
+    private void RestoreSettings()
+    {
+        AppSettings settings = _settings.Values;
+        string baudRate = settings.BaudRate.ToString(CultureInfo.InvariantCulture);
+        BaudComboBox.SelectedItem = BaudComboBox.Items.OfType<string>().Contains(baudRate) ? baudRate : "115200";
+        DisplayModeSelector.SelectedItem = settings.DisplayHex ? HexModeItem : AsciiModeItem;
+        SendModeComboBox.SelectedIndex = Math.Clamp(settings.SendModeIndex, 0, SendModeComboBox.Items.Count - 1);
+        LineEndingComboBox.SelectedIndex = Math.Clamp(settings.LineEndingIndex, 0, LineEndingComboBox.Items.Count - 1);
+        AutoScrollButton.IsChecked = settings.AutoScroll;
+        DemoToggle.IsChecked = settings.DemoEnabled;
+        WorkspaceTabs.SelectedIndex = Math.Clamp(settings.WorkspaceTabIndex, 0, 3);
+        TimeWindowSlider.Value = Math.Clamp(settings.ScopeTimeWindowIndex, 0, TimeWindowSteps.Length - 1);
+        VerticalGainSlider.Value = Math.Clamp(settings.ScopeVerticalGainIndex, 0, VerticalGainSteps.Length - 1);
+        RestoreYAxisMode(settings.ScopeYAxisMode);
+        UpdateLogScrollMode();
+    }
+
+    private void RestoreYAxisMode(string mode)
+    {
+        if (mode.Equals("FullRange", StringComparison.OrdinalIgnoreCase))
+        {
+            _yAxisMode = YAxisMode.FullRange;
+            VerticalGainSlider.IsEnabled = false;
+            UpdateYAxisModeButton("Auto: Full", "Y axis mode Full range");
+        }
+        else if (mode.Equals("Manual", StringComparison.OrdinalIgnoreCase))
+        {
+            _yAxisMode = YAxisMode.Manual;
+            _manualYInitialized = false;
+            VerticalGainSlider.IsEnabled = true;
+            UpdateYAxisModeButton("Y: Manual", "Y axis mode Manual");
+        }
+        else
+        {
+            _yAxisMode = YAxisMode.Follow;
+            _autoYInitialized = false;
+            VerticalGainSlider.IsEnabled = false;
+            UpdateYAxisModeButton("Auto: Follow", "Y axis mode Follow");
+        }
+    }
+
+    private void SaveSettings(Action<AppSettings> update)
+    {
+        if (!_settingsReady)
+        {
+            return;
         }
 
-        if (previous is not null && PortNames.Contains(previous))
-        {
-            PortComboBox.SelectedItem = previous;
-        }
-        else if (PortNames.Count > 0)
-        {
-            PortComboBox.SelectedIndex = 0;
-        }
+        update(_settings.Values);
+        _settings.Save();
+    }
 
-        TransientStatusText.Text = PortNames.Count == 0 ? "No COM ports" : $"{PortNames.Count} port(s)";
+    private void PortComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_refreshingPorts && PortComboBox.SelectedItem is string portName)
+        {
+            SaveSettings(settings => settings.SerialPort = portName);
+        }
+    }
+
+    private void BaudComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (BaudComboBox.SelectedItem is string value && int.TryParse(value, out int baudRate))
+        {
+            SaveSettings(settings => settings.BaudRate = baudRate);
+        }
+    }
+
+    private void SendModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        SaveSettings(settings => settings.SendModeIndex = SendModeComboBox.SelectedIndex);
+    }
+
+    private void LineEndingComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        SaveSettings(settings => settings.LineEndingIndex = LineEndingComboBox.SelectedIndex);
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
@@ -284,6 +379,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 SetConnectionState(false, "DISCONNECTED");
             }
         }
+
+        SaveSettings(settings => settings.DemoEnabled = enabled);
     }
 
     private void EnsureDemoMetadata()
@@ -489,10 +586,25 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                                    name.Contains("overrun", StringComparison.OrdinalIgnoreCase);
         bool preferred = name.Equals("adc", StringComparison.OrdinalIgnoreCase) || name.Equals("avg", StringComparison.OrdinalIgnoreCase);
         bool visible = preferred || (!suppressedByDefault && Metrics.Count(item => item.IsVisible) < 2);
+        string visibilityKey = name.ToLowerInvariant();
+        if (_settings.Values.MetricVisibility!.TryGetValue(visibilityKey, out bool savedVisibility))
+        {
+            visible = savedVisibility;
+        }
+
         metric = new TelemetryMetric(name, new SolidColorBrush(ParseColor(color)), visible);
+        metric.PropertyChanged += TelemetryMetric_PropertyChanged;
         _metricsByName.Add(name, metric);
         Metrics.Add(metric);
         return metric;
+    }
+
+    private void TelemetryMetric_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TelemetryMetric.IsVisible) && sender is TelemetryMetric metric)
+        {
+            SaveSettings(settings => settings.MetricVisibility![metric.Name.ToLowerInvariant()] = metric.IsVisible);
+        }
     }
 
     private void Send_Click(object sender, RoutedEventArgs e)
@@ -651,6 +763,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             entry.SetHexDisplay(_displayHex);
         }
+
+        SaveSettings(settings => settings.DisplayHex = _displayHex);
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
@@ -831,6 +945,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             ScrollToLatest();
         }
+
+        SaveSettings(settings => settings.AutoScroll = AutoScrollButton.IsChecked == true);
     }
 
     private void LogListView_Loaded(object sender, RoutedEventArgs e)
@@ -1129,6 +1245,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         RenderPlot();
+        SaveSettings(settings => settings.ScopeTimeWindowIndex = index);
     }
 
     private void VerticalGainSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -1142,6 +1259,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         RenderPlot();
+        SaveSettings(settings => settings.ScopeVerticalGainIndex = index);
     }
 
     private void YAxisFollow_Click(object sender, RoutedEventArgs e)
@@ -1158,6 +1276,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         UpdateYAxisModeButton("Y: Fit", "Y axis mode Fit once");
         TransientStatusText.Text = "Y axis fitted once";
         RenderPlot();
+        SaveSettings(settings => settings.ScopeYAxisMode = "Manual");
     }
 
     private void YAxisFullRange_Click(object sender, RoutedEventArgs e)
@@ -1168,6 +1287,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         bool hasMetadata = Metrics.Any(metric => metric.IsVisible && metric.HasDeclaredRange);
         TransientStatusText.Text = hasMetadata ? "Using declared channel range" : "Full range: no metadata, using visible data";
         RenderPlot();
+        SaveSettings(settings => settings.ScopeYAxisMode = "FullRange");
     }
 
     private void YAxisManual_Click(object sender, RoutedEventArgs e)
@@ -1179,6 +1299,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         UpdateYAxisModeButton("Y: Manual", "Y axis mode Manual");
         TransientStatusText.Text = "Manual Y scale";
         RenderPlot();
+        SaveSettings(settings => settings.ScopeYAxisMode = "Manual");
     }
 
     private void SetYAxisFollow()
@@ -1190,6 +1311,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         UpdateYAxisModeButton("Auto: Follow", "Y axis mode Follow");
         TransientStatusText.Text = "Auto Y following";
         RenderPlot();
+        SaveSettings(settings => settings.ScopeYAxisMode = "Follow");
     }
 
     private void FreezeCurrentYAxis()
@@ -1355,6 +1477,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             ScrollToLatest();
         }
+
+        SaveSettings(settings => settings.WorkspaceTabIndex = WorkspaceTabs.SelectedIndex);
     }
 
     private bool IsConsoleTabSelected => ReferenceEquals(WorkspaceTabs.SelectedItem, ConsoleTab);
