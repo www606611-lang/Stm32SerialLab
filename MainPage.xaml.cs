@@ -72,6 +72,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private double _memoryChartWidth;
     private double _memoryChartHeight;
     private ElementTheme _memoryChartTheme;
+    private Border? _memoryHoverCard;
+    private TextBlock? _memoryHoverCardText;
+    private string? _memoryHoverKey;
     private ItemsStackPanel? _logItemsPanel;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
@@ -106,6 +109,14 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _plotTimer.Tick += PlotTimer_Tick;
         _uiRefreshTimer.Tick += UiRefreshTimer_Tick;
         ActualThemeChanged += MainPage_ActualThemeChanged;
+        MemoryCanvas.AddHandler(
+            UIElement.PointerMovedEvent,
+            new PointerEventHandler(MemoryCanvas_PointerMoved),
+            true);
+        MemoryCanvas.AddHandler(
+            UIElement.PointerExitedEvent,
+            new PointerEventHandler(MemoryCanvas_PointerExited),
+            true);
     }
 
     public ObservableCollection<string> PortNames { get; } = [];
@@ -963,7 +974,148 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void MemoryCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        CloseMemoryHover();
         RenderMemoryChart();
+    }
+
+    private void MemoryCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (MemoryCanvas is null || Memory.HeapStart == 0 || Memory.HeapEnd <= Memory.HeapStart)
+        {
+            CloseMemoryHover();
+            return;
+        }
+
+        Point position = e.GetCurrentPoint(MemoryCanvas).Position;
+        const double left = 12;
+        const double right = 12;
+        const double top = 25;
+        const double barHeight = 32;
+        double barWidth = Math.Max(1, MemoryCanvas.ActualWidth - left - right);
+        if (position.X < left || position.X > left + barWidth ||
+            position.Y < top || position.Y > top + barHeight)
+        {
+            CloseMemoryHover();
+            return;
+        }
+
+        double fraction = Math.Clamp((position.X - left) / barWidth, 0, 1);
+        uint address = Memory.HeapStart + (uint)Math.Min(
+            Memory.HeapEnd - Memory.HeapStart - 1U,
+            fraction * (Memory.HeapEnd - (double)Memory.HeapStart));
+        MemoryRegionRow? block = Memory.Regions
+            .Where(region =>
+                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
+                region.Start >= Memory.HeapStart &&
+                region.End <= Memory.HeapEnd &&
+                region.End > region.Start &&
+                address >= region.Start &&
+                address < region.End)
+            .OrderBy(region => region.Size)
+            .ThenBy(region => region.Start)
+            .FirstOrDefault();
+
+        if (block is null)
+        {
+            CloseMemoryHover();
+            return;
+        }
+
+        string hoverKey = $"{block.Kind}:{block.Start:X8}:{block.End:X8}";
+        if (_memoryHoverKey == hoverKey)
+        {
+            UpdateMemoryHoverCardPosition(position);
+            return;
+        }
+
+        _memoryHoverKey = hoverKey;
+        string hoverText = FormatMemoryBlockHoverText(block);
+        MemoryBlockHoverText.Text = hoverText.Replace("\n", "  |  ", StringComparison.Ordinal);
+        ShowMemoryHoverCard(hoverText, position);
+    }
+
+    private void MemoryCanvas_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        CloseMemoryHover();
+    }
+
+    private void CloseMemoryHover()
+    {
+        _memoryHoverKey = null;
+
+        if (_memoryHoverCard is not null)
+        {
+            _memoryHoverCard.Visibility = Visibility.Collapsed;
+        }
+
+        if (MemoryBlockHoverText is not null)
+        {
+            MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
+        }
+    }
+
+    private void ShowMemoryHoverCard(string text, Point pointerPosition)
+    {
+        if (_memoryHoverCard is null)
+        {
+            bool isDark = RootLayout.ActualTheme == ElementTheme.Dark;
+            _memoryHoverCardText = new TextBlock
+            {
+                Foreground = new SolidColorBrush(isDark
+                    ? ColorHelper.FromArgb(255, 255, 255, 255)
+                    : ColorHelper.FromArgb(255, 20, 20, 20)),
+                FontFamily = (FontFamily)Application.Current.Resources["LabMonoFont"],
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 320
+            };
+            _memoryHoverCard = new Border
+            {
+                Background = new SolidColorBrush(isDark
+                    ? ColorHelper.FromArgb(248, 42, 42, 46)
+                    : ColorHelper.FromArgb(248, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(isDark
+                    ? ColorHelper.FromArgb(220, 145, 145, 150)
+                    : ColorHelper.FromArgb(220, 100, 100, 105)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(9, 7, 9, 7),
+                IsHitTestVisible = false,
+                Child = _memoryHoverCardText
+            };
+            Canvas.SetZIndex(_memoryHoverCard, 1000);
+            MemoryCanvas.Children.Add(_memoryHoverCard);
+        }
+
+        _memoryHoverCardText!.Text = text;
+        _memoryHoverCard.Visibility = Visibility.Visible;
+        UpdateMemoryHoverCardPosition(pointerPosition);
+    }
+
+    private void UpdateMemoryHoverCardPosition(Point pointerPosition)
+    {
+        if (_memoryHoverCard is null || _memoryHoverCard.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _memoryHoverCard.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double cardWidth = _memoryHoverCard.DesiredSize.Width;
+        double cardHeight = _memoryHoverCard.DesiredSize.Height;
+        double left = pointerPosition.X + 14;
+        double top = pointerPosition.Y - cardHeight - 10;
+        if (left + cardWidth > MemoryCanvas.ActualWidth - 8)
+        {
+            left = pointerPosition.X - cardWidth - 14;
+        }
+
+        if (top < 8)
+        {
+            top = pointerPosition.Y + 14;
+        }
+
+        Canvas.SetLeft(_memoryHoverCard, Math.Max(8, left));
+        Canvas.SetTop(_memoryHoverCard, Math.Max(8, top));
     }
 
     private void TimeWindowSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -1337,6 +1489,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             _memoryChartWidth = width;
             _memoryChartHeight = height;
             _memoryChartTheme = RootLayout.ActualTheme;
+            CloseMemoryHover();
+            _memoryHoverCard = null;
+            _memoryHoverCardText = null;
             MemoryCanvas.Children.Clear();
             MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
             AddMemoryCanvasLabel("Waiting for heap address telemetry", left, top + 8, labelBrush);
@@ -1366,6 +1521,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _memoryChartWidth = width;
         _memoryChartHeight = height;
         _memoryChartTheme = RootLayout.ActualTheme;
+        CloseMemoryHover();
+        _memoryHoverCard = null;
+        _memoryHoverCardText = null;
         MemoryCanvas.Children.Clear();
         MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
 
@@ -1410,18 +1568,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 Stroke = new SolidColorBrush(ColorHelper.FromArgb(150, 255, 255, 255)),
                 StrokeThickness = 0.5
             };
-            string hoverText = FormatMemoryBlockHoverText(block);
-            ToolTip tooltip = new()
-            {
-                Content = new TextBlock
-                {
-                    Text = hoverText,
-                    TextWrapping = TextWrapping.Wrap
-                }
-            };
-            ToolTipService.SetToolTip(segment, tooltip);
-            segment.PointerEntered += (_, _) => MemoryBlockHoverText.Text = hoverText;
-            segment.PointerExited += (_, _) => MemoryBlockHoverText.Text = GetDefaultMemoryBlockHoverText();
             Canvas.SetLeft(segment, x);
             Canvas.SetTop(segment, top);
             MemoryCanvas.Children.Add(segment);
