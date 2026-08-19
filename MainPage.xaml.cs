@@ -36,6 +36,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private const int MaxLineBytes = 2048;
     private const int MaxReceiveChunksPerDrain = 64;
     private const int MaxVisibleUpdatesPerRefresh = 32;
+    private const int MaxMemoryHistorySamples = 180;
     private static readonly UTF8Encoding Utf8 = new(false, false);
     private static readonly string[] Palette =
     [
@@ -46,12 +47,14 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private readonly SerialPortService _serialPort = new();
     private readonly TelemetryParser _telemetryParser = new();
+    private readonly MemoryTelemetryParser _memoryTelemetryParser = new();
     private readonly Queue<SerialLogEntry> _allLogs = [];
     private readonly Queue<SerialLogEntry> _pendingVisibleLogs = [];
     private readonly ConcurrentQueue<byte[]> _pendingReceiveChunks = [];
     private readonly List<byte> _lineBuffer = [];
     private readonly Dictionary<string, TelemetryMetric> _metricsByName = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _commandHistory = [];
+    private readonly Queue<MemoryHistorySample> _memoryHistory = [];
     private readonly DispatcherTimer _demoTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer _plotTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
@@ -81,6 +84,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private DateTimeOffset _scopeEndTime;
     private DateTimeOffset _panStartEndTime;
     private double _demoAverage = 1870;
+    private long _lastDemoMemoryTick = -1000;
+    private uint _demoHeapMinimumFree = 3448;
     private long _rxBytes;
     private long _txBytes;
     private long _rxLines;
@@ -103,6 +108,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     public ObservableCollection<string> PortNames { get; } = [];
     public ObservableCollection<SerialLogEntry> Logs { get; } = [];
     public ObservableCollection<TelemetryMetric> Metrics { get; } = [];
+    public MemoryDashboard Memory { get; } = new();
     public string RxStatusText => $"RX {_rxBytes:N0} B";
     public string TxStatusText => $"TX {_txBytes:N0} B";
     public string LineStatusText => $"LINES {_rxLines:N0}";
@@ -243,8 +249,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
             if (!_demoTimer.IsEnabled)
             {
+                ResetMemoryDashboard("DEMO / PC GENERATED");
                 EnsureDemoMetadata();
                 _demoClock.Restart();
+                _lastDemoMemoryTick = -1000;
+                _demoHeapMinimumFree = 3448;
                 _demoTimer.Start();
                 AddSystemLog("Demo telemetry started");
             }
@@ -255,6 +264,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         else
         {
             _demoTimer.Stop();
+            ResetMemoryDashboard("WAITING FOR STM32 TELEMETRY");
             if (!_serialPort.IsOpen)
             {
                 SetConnectionState(false, "DISCONNECTED");
@@ -286,6 +296,30 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         int heap = 4224 - (int)((tick / 10000) % 4) * 16;
         string line = FormattableString.Invariant($"tick={tick} heap={heap} adc={adc} avg={_demoAverage:F1} overrun=0\r\n");
         ProcessReceivedBytes(Encoding.ASCII.GetBytes(line), SerialDirection.Demo);
+
+        if (tick - _lastDemoMemoryTick >= 1000)
+        {
+            _lastDemoMemoryTick = tick;
+            EmitDemoMemoryTelemetry(tick);
+        }
+    }
+
+    private void EmitDemoMemoryTelemetry(long tick)
+    {
+        uint queueDepth = (uint)((tick / 1000) % 3);
+        uint routerStackFree = tick < 5000 ? 320U : tick < 10000 ? 300U : 284U;
+        const uint heapFree = 3448;
+        _demoHeapMinimumFree = Math.Min(_demoHeapMinimumFree, heapFree);
+
+        string telemetry =
+            $"@mem flash_used=13412 flash_code_const=13408 flash_data_init=4 flash_app_total=64512 flash_parameter=1024 ram_static=6552 ram_data=4 ram_bss=6548 ram_total=20480 heap_total=6144 heap_initial_free=6128 heap_free={heapFree} heap_min_free={_demoHeapMinimumFree}\r\n" +
+            "@task name=SENSOR stack_alloc=512 stack_min_free=356 heap_alloc=616 priority=1 state=BLOCKED\r\n" +
+            "@task name=CONTROL stack_alloc=512 stack_min_free=348 heap_alloc=616 priority=1 state=BLOCKED\r\n" +
+            $"@task name=ROUTER stack_alloc=512 stack_min_free={routerStackFree} heap_alloc=616 priority=2 state=RUNNING\r\n" +
+            "@task name=IDLE stack_alloc=512 stack_min_free=400 heap_alloc=616 priority=0 state=READY\r\n" +
+            $"@object kind=queue name=EVENT_QUEUE heap_alloc=216 payload_alloc=128 capacity=8 depth={queueDepth} item_size=16\r\n" +
+            "@object kind=allocator name=HEAP4_METADATA heap_alloc=16 payload_alloc=0 capacity=0 depth=0 item_size=0\r\n";
+        ProcessReceivedBytes(Encoding.ASCII.GetBytes(telemetry), SerialDirection.Demo);
     }
 
     private void SerialPort_BytesReceived(object? sender, byte[] data)
@@ -332,7 +366,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 _rxLines++;
                 string line = Utf8.GetString(_lineBuffer.ToArray()).TrimEnd('\r');
                 _lineBuffer.Clear();
-                ProcessTelemetryLine(line);
+                ProcessTelemetryLine(line, direction);
                 continue;
             }
 
@@ -350,8 +384,21 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _countersDirty = true;
     }
 
-    private void ProcessTelemetryLine(string line)
+    private void ProcessTelemetryLine(string line, SerialDirection direction)
     {
+        MemoryTelemetryParseResult memoryResult = _memoryTelemetryParser.Parse(line);
+        if (memoryResult.IsError)
+        {
+            _parseErrors++;
+            return;
+        }
+
+        if (memoryResult.IsMemoryTelemetry)
+        {
+            ApplyMemoryTelemetry(memoryResult, direction);
+            return;
+        }
+
         TelemetryParseResult result = _telemetryParser.Parse(line);
         if (result.IsError)
         {
@@ -375,6 +422,53 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         foreach ((string name, double value) in result.Values)
         {
             GetOrCreateMetric(name).AddSample(now, value);
+        }
+    }
+
+    private void ApplyMemoryTelemetry(
+        MemoryTelemetryParseResult result,
+        SerialDirection direction)
+    {
+        string source = direction == SerialDirection.Demo
+            ? "DEMO / PC GENERATED"
+            : "STM32 / SERIAL";
+        DateTimeOffset now = DateTimeOffset.Now;
+
+        if (result.Memory is { } memory)
+        {
+            Memory.Apply(memory, source, now);
+            _memoryHistory.Enqueue(new MemoryHistorySample(
+                now,
+                memory.HeapFree,
+                memory.HeapMinimumFree,
+                memory.HeapTotal));
+            while (_memoryHistory.Count > MaxMemoryHistorySamples)
+            {
+                _memoryHistory.Dequeue();
+            }
+
+            if (IsMemoryTabSelected)
+            {
+                RenderMemoryChart();
+            }
+        }
+        else if (result.Task is { } task)
+        {
+            Memory.Apply(task);
+        }
+        else if (result.Object is { } item)
+        {
+            Memory.Apply(item);
+        }
+    }
+
+    private void ResetMemoryDashboard(string sourceLabel)
+    {
+        Memory.Reset(sourceLabel);
+        _memoryHistory.Clear();
+        if (MemoryCanvas is not null)
+        {
+            RenderMemoryChart();
         }
     }
 
@@ -862,11 +956,20 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             RenderPlot();
         }
+        else if (IsMemoryTabSelected)
+        {
+            RenderMemoryChart();
+        }
     }
 
     private void ScopeCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         RenderPlot();
+    }
+
+    private void MemoryCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RenderMemoryChart();
     }
 
     private void TimeWindowSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -1088,6 +1191,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         ScopePanel.Height = contentHeight;
         TelemetryPanel.Width = contentWidth;
         TelemetryPanel.Height = contentHeight;
+        MemoryPanel.Width = contentWidth;
+        MemoryPanel.Height = contentHeight;
     }
 
     private void WorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1095,6 +1200,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         if (IsScopeTabSelected)
         {
             RenderPlot();
+        }
+        else if (IsMemoryTabSelected)
+        {
+            RenderMemoryChart();
         }
         else if (IsConsoleTabSelected)
         {
@@ -1105,6 +1214,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool IsConsoleTabSelected => ReferenceEquals(WorkspaceTabs.SelectedItem, ConsoleTab);
 
     private bool IsScopeTabSelected => ReferenceEquals(WorkspaceTabs.SelectedItem, ScopeTab);
+
+    private bool IsMemoryTabSelected => ReferenceEquals(WorkspaceTabs.SelectedItem, MemoryTab);
 
     private void RenderPlot()
     {
@@ -1188,6 +1299,100 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 Clip = new RectangleGeometry { Rect = new Rect(left, top, plotWidth, plotHeight) }
             });
         }
+    }
+
+    private void RenderMemoryChart()
+    {
+        if (_loaded && !IsMemoryTabSelected)
+        {
+            return;
+        }
+
+        if (MemoryCanvas is null || MemoryCanvas.ActualWidth < 160 || MemoryCanvas.ActualHeight < 80)
+        {
+            return;
+        }
+
+        MemoryCanvas.Children.Clear();
+        double width = MemoryCanvas.ActualWidth;
+        double height = MemoryCanvas.ActualHeight;
+        const double left = 54;
+        const double right = 16;
+        const double top = 10;
+        const double bottom = 22;
+        double plotWidth = Math.Max(1, width - left - right);
+        double plotHeight = Math.Max(1, height - top - bottom);
+        Windows.UI.Color gridColor = RootLayout.ActualTheme == ElementTheme.Dark
+            ? ColorHelper.FromArgb(70, 255, 255, 255)
+            : ColorHelper.FromArgb(45, 0, 0, 0);
+        SolidColorBrush gridBrush = new(gridColor);
+        SolidColorBrush labelBrush = new(RootLayout.ActualTheme == ElementTheme.Dark
+            ? ColorHelper.FromArgb(190, 255, 255, 255)
+            : ColorHelper.FromArgb(175, 0, 0, 0));
+
+        for (int index = 0; index <= 4; index++)
+        {
+            double x = left + (plotWidth * index / 4.0);
+            double y = top + (plotHeight * index / 4.0);
+            MemoryCanvas.Children.Add(new Line { X1 = x, X2 = x, Y1 = top, Y2 = top + plotHeight, Stroke = gridBrush, StrokeThickness = 1 });
+            MemoryCanvas.Children.Add(new Line { X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y, Stroke = gridBrush, StrokeThickness = 1 });
+        }
+
+        uint chartMaximum = Math.Max(1U, Memory.HeapTotal);
+        AddMemoryCanvasLabel(MemoryDashboard.FormatBytes(chartMaximum), 4, top - 5, labelBrush);
+        AddMemoryCanvasLabel("0 B", 4, top + plotHeight - 6, labelBrush);
+        AddMemoryCanvasLabel("older", left, top + plotHeight + 4, labelBrush);
+        AddMemoryCanvasLabel("now", left + plotWidth - 26, top + plotHeight + 4, labelBrush);
+
+        MemoryHistorySample[] samples = _memoryHistory.ToArray();
+        if (samples.Length < 2)
+        {
+            AddMemoryCanvasLabel("Waiting for @mem samples", left + 8, top + plotHeight / 2 - 7, labelBrush);
+            return;
+        }
+
+        PointCollection freePoints = [];
+        PointCollection minimumPoints = [];
+        for (int index = 0; index < samples.Length; index++)
+        {
+            double x = left + plotWidth * index / (samples.Length - 1.0);
+            double freeY = top + plotHeight * (1 - Math.Clamp(samples[index].HeapFree / (double)chartMaximum, 0, 1));
+            double minimumY = top + plotHeight * (1 - Math.Clamp(samples[index].HeapMinimumFree / (double)chartMaximum, 0, 1));
+            freePoints.Add(new Point(x, freeY));
+            minimumPoints.Add(new Point(x, minimumY));
+        }
+
+        Rect clip = new(left, top, plotWidth, plotHeight);
+        MemoryCanvas.Children.Add(new Polyline
+        {
+            Points = freePoints,
+            Stroke = new SolidColorBrush(ColorHelper.FromArgb(255, 16, 185, 129)),
+            StrokeThickness = 2,
+            StrokeLineJoin = PenLineJoin.Round,
+            Clip = new RectangleGeometry { Rect = clip }
+        });
+        MemoryCanvas.Children.Add(new Polyline
+        {
+            Points = minimumPoints,
+            Stroke = new SolidColorBrush(ColorHelper.FromArgb(255, 245, 158, 11)),
+            StrokeThickness = 1.6,
+            StrokeLineJoin = PenLineJoin.Round,
+            Clip = new RectangleGeometry { Rect = clip }
+        });
+    }
+
+    private void AddMemoryCanvasLabel(string text, double x, double y, Brush foreground)
+    {
+        TextBlock label = new()
+        {
+            Text = text,
+            FontFamily = (FontFamily)Application.Current.Resources["LabMonoFont"],
+            FontSize = 10,
+            Foreground = foreground
+        };
+        Canvas.SetLeft(label, x);
+        Canvas.SetTop(label, y);
+        MemoryCanvas.Children.Add(label);
     }
 
     private void AddCanvasLabel(string text, double x, double y, Brush foreground)

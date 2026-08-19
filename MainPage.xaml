@@ -556,6 +556,159 @@
                     </ListView>
                 </Grid>
             </TabViewItem>
+
+            <TabViewItem x:Name="MemoryTab" Header="Memory" HorizontalContentAlignment="Stretch" IsClosable="False" VerticalContentAlignment="Stretch">
+                <Grid x:Name="MemoryPanel" RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="210" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="12">
+                        <TextBlock VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.SourceLabel, Mode=OneWay}" />
+                        <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.LastUpdateText, Mode=OneWay}" />
+                    </Grid>
+                    <Grid Grid.Row="1" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0" RowSpacing="4">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="Flash (build-time)" />
+                            <TextBlock Grid.Row="1" Style="{StaticResource MetricValueStyle}" Text="{x:Bind Memory.FlashUsedText, Mode=OneWay}" />
+                            <ProgressBar Grid.Row="2" Maximum="{x:Bind Memory.FlashProgressMaximum, Mode=OneWay}" Value="{x:Bind Memory.FlashProgressValue, Mode=OneWay}" />
+                            <TextBlock Grid.Row="3" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.FlashDetailText, Mode=OneWay}" TextWrapping="Wrap" />
+                        </Grid>
+                        <Grid Grid.Column="1" RowSpacing="4">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="RAM (linker layout)" />
+                            <TextBlock Grid.Row="1" Style="{StaticResource MetricValueStyle}" Text="{x:Bind Memory.RamUsedText, Mode=OneWay}" />
+                            <ProgressBar Grid.Row="2" Maximum="{x:Bind Memory.RamProgressMaximum, Mode=OneWay}" Value="{x:Bind Memory.RamProgressValue, Mode=OneWay}" />
+                            <TextBlock Grid.Row="3" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.RamDetailText, Mode=OneWay}" TextWrapping="Wrap" />
+                        </Grid>
+                        <Grid Grid.Column="2" RowSpacing="4">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="FreeRTOS heap (live)" />
+                            <TextBlock Grid.Row="1" Style="{StaticResource MetricValueStyle}" Text="{x:Bind Memory.HeapUsedText, Mode=OneWay}" />
+                            <ProgressBar Grid.Row="2" Maximum="{x:Bind Memory.HeapProgressMaximum, Mode=OneWay}" Value="{x:Bind Memory.HeapProgressValue, Mode=OneWay}" />
+                            <TextBlock Grid.Row="3" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.HeapDetailText, Mode=OneWay}" TextWrapping="Wrap" />
+                        </Grid>
+                    </Grid>
+
+                    <Grid Grid.Row="2" RowSpacing="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="12">
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="Heap history" />
+                            <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="green free  |  amber minimum-ever free" />
+                        </Grid>
+                        <Canvas
+                            x:Name="MemoryCanvas"
+                            Grid.Row="1"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            SizeChanged="MemoryCanvas_SizeChanged" />
+                    </Grid>
+
+                    <Grid Grid.Row="3" ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.1*" />
+                            <ColumnDefinition Width="0.9*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0" RowSpacing="5">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="Task stacks" />
+                            <ListView Grid.Row="1" ItemsSource="{x:Bind Memory.Tasks}" SelectionMode="None">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="52" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:TaskMemoryRow">
+                                        <Grid Padding="2,5" ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="96" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="1">
+                                                <TextBlock FontWeight="SemiBold" Text="{x:Bind Name}" />
+                                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind PriorityText}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Spacing="3">
+                                                <ProgressBar Maximum="100" Value="{x:Bind StackUsagePercent, Mode=OneWay}" />
+                                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind StackUsageText}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="1">
+                                                <TextBlock HorizontalAlignment="Right" Text="{x:Bind MarginStatus}" />
+                                                <TextBlock HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource LabMonoTextStyle}" Text="{x:Bind StackMarginText}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                        <Grid Grid.Column="1" RowSpacing="5">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="Heap objects" />
+                            <ListView Grid.Row="1" ItemsSource="{x:Bind Memory.Objects}" SelectionMode="None">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="50" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:ObjectMemoryRow">
+                                        <Grid Padding="2,5" ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="1">
+                                                <TextBlock FontWeight="SemiBold" Text="{x:Bind Name}" />
+                                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind PayloadText}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind LiveStateText}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource MetricValueStyle}" Text="{x:Bind HeapAllocationText}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </TabViewItem>
         </TabView>
 
         <Grid Grid.Row="2" ColumnSpacing="14">
