@@ -36,7 +36,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private const int MaxLineBytes = 2048;
     private const int MaxReceiveChunksPerDrain = 64;
     private const int MaxVisibleUpdatesPerRefresh = 32;
-    private const int MaxMemoryHistorySamples = 180;
     private static readonly UTF8Encoding Utf8 = new(false, false);
     private static readonly string[] Palette =
     [
@@ -54,7 +53,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private readonly List<byte> _lineBuffer = [];
     private readonly Dictionary<string, TelemetryMetric> _metricsByName = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _commandHistory = [];
-    private readonly Queue<MemoryHistorySample> _memoryHistory = [];
     private readonly DispatcherTimer _demoTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer _plotTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
@@ -69,6 +67,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool _isPanning;
     private bool _serialOperationInProgress;
     private bool _countersDirty;
+    private bool _memoryVisualDirty;
     private ItemsStackPanel? _logItemsPanel;
     private int _historyIndex;
     private double _timeWindowSeconds = 10;
@@ -437,20 +436,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         if (result.Memory is { } memory)
         {
             Memory.Apply(memory, source, now);
-            _memoryHistory.Enqueue(new MemoryHistorySample(
-                now,
-                memory.HeapFree,
-                memory.HeapMinimumFree,
-                memory.HeapTotal));
-            while (_memoryHistory.Count > MaxMemoryHistorySamples)
-            {
-                _memoryHistory.Dequeue();
-            }
-
-            if (IsMemoryTabSelected)
-            {
-                RenderMemoryChart();
-            }
         }
         else if (result.Task is { } task)
         {
@@ -460,16 +445,14 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             Memory.Apply(item);
         }
+
+        _memoryVisualDirty = true;
     }
 
     private void ResetMemoryDashboard(string sourceLabel)
     {
         Memory.Reset(sourceLabel);
-        _memoryHistory.Clear();
-        if (MemoryCanvas is not null)
-        {
-            RenderMemoryChart();
-        }
+        _memoryVisualDirty = true;
     }
 
     private TelemetryMetric GetOrCreateMetric(string name)
@@ -780,6 +763,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             _countersDirty = false;
             RefreshCounters();
+        }
+
+        if (_memoryVisualDirty && IsMemoryTabSelected)
+        {
+            _memoryVisualDirty = false;
+            RenderMemoryChart();
         }
 
     }
@@ -1311,70 +1300,113 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         MemoryCanvas.Children.Clear();
         double width = MemoryCanvas.ActualWidth;
-        double height = MemoryCanvas.ActualHeight;
-        const double left = 54;
-        const double right = 16;
-        const double top = 10;
-        const double bottom = 22;
-        double plotWidth = Math.Max(1, width - left - right);
-        double plotHeight = Math.Max(1, height - top - bottom);
-        Windows.UI.Color gridColor = RootLayout.ActualTheme == ElementTheme.Dark
-            ? ColorHelper.FromArgb(70, 255, 255, 255)
-            : ColorHelper.FromArgb(45, 0, 0, 0);
-        SolidColorBrush gridBrush = new(gridColor);
+        const double left = 12;
+        const double right = 12;
+        const double top = 25;
+        const double barHeight = 32;
+        double barWidth = Math.Max(1, width - left - right);
         SolidColorBrush labelBrush = new(RootLayout.ActualTheme == ElementTheme.Dark
-            ? ColorHelper.FromArgb(190, 255, 255, 255)
-            : ColorHelper.FromArgb(175, 0, 0, 0));
+            ? ColorHelper.FromArgb(205, 255, 255, 255)
+            : ColorHelper.FromArgb(190, 0, 0, 0));
+        SolidColorBrush emptyBrush = new(RootLayout.ActualTheme == ElementTheme.Dark
+            ? ColorHelper.FromArgb(255, 62, 62, 66)
+            : ColorHelper.FromArgb(255, 224, 224, 224));
 
-        for (int index = 0; index <= 4; index++)
+        uint heapStart = Memory.HeapStart;
+        uint heapEnd = Memory.HeapEnd;
+        if (heapStart == 0 || heapEnd <= heapStart)
         {
-            double x = left + (plotWidth * index / 4.0);
-            double y = top + (plotHeight * index / 4.0);
-            MemoryCanvas.Children.Add(new Line { X1 = x, X2 = x, Y1 = top, Y2 = top + plotHeight, Stroke = gridBrush, StrokeThickness = 1 });
-            MemoryCanvas.Children.Add(new Line { X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y, Stroke = gridBrush, StrokeThickness = 1 });
-        }
-
-        uint chartMaximum = Math.Max(1U, Memory.HeapTotal);
-        AddMemoryCanvasLabel(MemoryDashboard.FormatBytes(chartMaximum), 4, top - 5, labelBrush);
-        AddMemoryCanvasLabel("0 B", 4, top + plotHeight - 6, labelBrush);
-        AddMemoryCanvasLabel("older", left, top + plotHeight + 4, labelBrush);
-        AddMemoryCanvasLabel("now", left + plotWidth - 26, top + plotHeight + 4, labelBrush);
-
-        MemoryHistorySample[] samples = _memoryHistory.ToArray();
-        if (samples.Length < 2)
-        {
-            AddMemoryCanvasLabel("Waiting for @mem samples", left + 8, top + plotHeight / 2 - 7, labelBrush);
+            AddMemoryCanvasLabel("Waiting for heap address telemetry", left, top + 8, labelBrush);
             return;
         }
 
-        PointCollection freePoints = [];
-        for (int index = 0; index < samples.Length; index++)
-        {
-            double x = left + plotWidth * index / (samples.Length - 1.0);
-            double freeY = top + plotHeight * (1 - Math.Clamp(samples[index].HeapFree / (double)chartMaximum, 0, 1));
-            freePoints.Add(new Point(x, freeY));
-        }
+        AddMemoryCanvasLabel(MemoryDashboard.FormatAddress(heapStart), left, 3, labelBrush);
+        TextBlock endLabel = CreateMemoryCanvasLabel(MemoryDashboard.FormatAddress(heapEnd), labelBrush);
+        endLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Canvas.SetLeft(endLabel, Math.Max(left, width - right - endLabel.DesiredSize.Width));
+        Canvas.SetTop(endLabel, 3);
+        MemoryCanvas.Children.Add(endLabel);
 
-        Rect clip = new(left, top, plotWidth, plotHeight);
-        MemoryCanvas.Children.Add(new Polyline
+        Rectangle heapBar = new()
         {
-            Points = freePoints,
-            Stroke = new SolidColorBrush(ColorHelper.FromArgb(255, 16, 185, 129)),
-            StrokeThickness = 2,
-            StrokeLineJoin = PenLineJoin.Round,
-            Clip = new RectangleGeometry { Rect = clip }
-        });
+            Width = barWidth,
+            Height = barHeight,
+            Fill = emptyBrush,
+            Stroke = new SolidColorBrush(ColorHelper.FromArgb(90, 0, 0, 0)),
+            StrokeThickness = 1
+        };
+        Canvas.SetLeft(heapBar, left);
+        Canvas.SetTop(heapBar, top);
+        MemoryCanvas.Children.Add(heapBar);
+
+        MemoryRegionRow[] blocks = Memory.Regions
+            .Where(region =>
+                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
+                region.Start >= heapStart &&
+                region.End <= heapEnd &&
+                region.End > region.Start)
+            .OrderBy(region => region.Start)
+            .ThenBy(region => region.End)
+            .ToArray();
+        string[] blockPalette =
+        [
+            "#2563EB", "#0F766E", "#9333EA", "#DC2626", "#0891B2", "#4D7C0F",
+            "#DB2777", "#7C3AED", "#EA580C", "#0284C7", "#65A30D", "#BE123C"
+        ];
+        double heapSpan = heapEnd - (double)heapStart;
+        int legendColumns = Math.Max(1, (int)(barWidth / 150));
+
+        for (int index = 0; index < blocks.Length; index++)
+        {
+            MemoryRegionRow block = blocks[index];
+            SolidColorBrush fill = new(ParseColor(blockPalette[index % blockPalette.Length]));
+            double x = left + ((block.Start - heapStart) / heapSpan * barWidth);
+            double blockWidth = Math.Max(2, (block.End - block.Start) / heapSpan * barWidth);
+            Rectangle segment = new()
+            {
+                Width = Math.Min(blockWidth, left + barWidth - x),
+                Height = barHeight,
+                Fill = fill,
+                Stroke = new SolidColorBrush(ColorHelper.FromArgb(150, 255, 255, 255)),
+                StrokeThickness = 0.5
+            };
+            ToolTipService.SetToolTip(segment, $"{block.Kind}\n{block.RangeText}\n{block.SizeText}");
+            Canvas.SetLeft(segment, x);
+            Canvas.SetTop(segment, top);
+            MemoryCanvas.Children.Add(segment);
+
+            int legendRow = index / legendColumns;
+            int legendColumn = index % legendColumns;
+            double legendX = left + (legendColumn * barWidth / legendColumns);
+            double legendY = top + barHeight + 12 + (legendRow * 18);
+            Rectangle swatch = new() { Width = 8, Height = 8, Fill = fill };
+            Canvas.SetLeft(swatch, legendX);
+            Canvas.SetTop(swatch, legendY + 3);
+            MemoryCanvas.Children.Add(swatch);
+
+            TextBlock legend = CreateMemoryCanvasLabel(block.Kind, labelBrush);
+            legend.Width = Math.Max(50, (barWidth / legendColumns) - 16);
+            legend.TextTrimming = TextTrimming.CharacterEllipsis;
+            Canvas.SetLeft(legend, legendX + 13);
+            Canvas.SetTop(legend, legendY);
+            MemoryCanvas.Children.Add(legend);
+        }
     }
 
-    private void AddMemoryCanvasLabel(string text, double x, double y, Brush foreground)
+    private TextBlock CreateMemoryCanvasLabel(string text, Brush foreground)
     {
-        TextBlock label = new()
+        return new TextBlock
         {
             Text = text,
             FontFamily = (FontFamily)Application.Current.Resources["LabMonoFont"],
             FontSize = 10,
             Foreground = foreground
         };
+    }
+
+    private void AddMemoryCanvasLabel(string text, double x, double y, Brush foreground)
+    {
+        TextBlock label = CreateMemoryCanvasLabel(text, foreground);
         Canvas.SetLeft(label, x);
         Canvas.SetTop(label, y);
         MemoryCanvas.Children.Add(label);

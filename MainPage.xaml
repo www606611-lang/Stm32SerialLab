@@ -563,11 +563,15 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="190" />
-                        <RowDefinition Height="210" />
+                        <RowDefinition Height="124" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
                     <Grid Grid.Row="0" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                         <TextBlock VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.SourceLabel, Mode=OneWay}" />
                         <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Memory.LastUpdateText, Mode=OneWay}" />
                     </Grid>
@@ -622,6 +626,10 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock FontSize="15" FontWeight="SemiBold" Text="Address map" />
                             <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="ranges use an exclusive end address" />
                         </Grid>
@@ -679,8 +687,12 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <Grid ColumnSpacing="12">
-                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="Heap history" />
-                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="current free heap over time" />
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="FreeRTOS heap blocks" />
+                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="colored = known object  |  gray = free or allocator overhead" />
                         </Grid>
                         <Canvas
                             x:Name="MemoryCanvas"

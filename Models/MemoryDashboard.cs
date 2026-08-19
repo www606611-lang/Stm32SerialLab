@@ -5,12 +5,6 @@ using Stm32SerialLab.Services;
 
 namespace Stm32SerialLab.Models;
 
-public readonly record struct MemoryHistorySample(
-    DateTimeOffset Timestamp,
-    uint HeapFree,
-    uint HeapMinimumFree,
-    uint HeapTotal);
-
 public sealed class MemoryRegionRow : INotifyPropertyChanged
 {
     public MemoryRegionRow(string kind, string owner, uint start, uint end, string state)
@@ -91,6 +85,8 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
     public uint HeapInitialFree { get; private set; }
     public uint HeapFree { get; private set; }
     public uint HeapMinimumFree { get; private set; }
+    public uint HeapStart { get; private set; }
+    public uint HeapEnd { get; private set; }
 
     public uint HeapUsed => HeapTotal >= HeapFree ? HeapTotal - HeapFree : 0;
     public uint RamLinkerFree => RamTotal >= RamStatic ? RamTotal - RamStatic : 0;
@@ -131,6 +127,8 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         HeapInitialFree = snapshot.HeapInitialFree;
         HeapFree = snapshot.HeapFree;
         HeapMinimumFree = snapshot.HeapMinimumFree;
+        HeapStart = snapshot.HeapStart;
+        HeapEnd = snapshot.HeapEnd;
         NotifyOverviewChanged();
 
         foreach (TaskMemoryRow task in Tasks)
@@ -194,6 +192,8 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         HeapInitialFree = 0;
         HeapFree = 0;
         HeapMinimumFree = 0;
+        HeapStart = 0;
+        HeapEnd = 0;
         _regionsByKind.Clear();
         Regions.Clear();
         Tasks.Clear();
@@ -240,7 +240,11 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         foreach (ObjectMemoryRow item in Objects)
         {
             UpsertRegion($"{item.KindText} CTRL {item.Name}", "kernel object", item.HandleAddress, item.HandleAddress + item.StructBytes, item.HeapAllocationText);
-            UpsertRegion($"{item.KindText} DATA {item.Name}", "payload storage", item.StorageAddress, item.StorageEnd, item.LiveStateText);
+            if (item.StorageAddress != item.HandleAddress ||
+                item.StorageEnd != item.HandleAddress + item.StructBytes)
+            {
+                UpsertRegion($"{item.KindText} DATA {item.Name}", "payload storage", item.StorageAddress, item.StorageEnd, item.LiveStateText);
+            }
         }
     }
 
@@ -286,6 +290,8 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
         OnPropertyChanged(nameof(HeapInitialFree));
         OnPropertyChanged(nameof(HeapFree));
         OnPropertyChanged(nameof(HeapMinimumFree));
+        OnPropertyChanged(nameof(HeapStart));
+        OnPropertyChanged(nameof(HeapEnd));
         OnPropertyChanged(nameof(HeapUsed));
         OnPropertyChanged(nameof(FlashProgressValue));
         OnPropertyChanged(nameof(FlashProgressMaximum));
