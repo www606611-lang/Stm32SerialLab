@@ -239,6 +239,11 @@ public sealed class MemoryDashboard : INotifyPropertyChanged
 
         foreach (ObjectMemoryRow item in Objects)
         {
+            if (item.IsAllocator)
+            {
+                continue;
+            }
+
             UpsertRegion($"{item.KindText} CTRL {item.Name}", "kernel object", item.HandleAddress, item.HandleAddress + item.StructBytes, item.HeapAllocationText);
             if (item.StorageAddress != item.HandleAddress ||
                 item.StorageEnd != item.HandleAddress + item.StructBytes)
@@ -425,17 +430,28 @@ public sealed class ObjectMemoryRow : INotifyPropertyChanged
     public uint StorageAddress { get; private set; }
     public uint StorageEnd { get; private set; }
     public uint StructBytes { get; private set; }
+    public bool IsAllocator => Kind.Equals("allocator", StringComparison.OrdinalIgnoreCase);
     public double HeapSharePercent => HeapAllocated * 100.0 / Math.Max(1, _heapTotal);
     public string KindText => Kind.ToUpperInvariant();
-    public string HeapAllocationText => $"{MemoryDashboard.FormatBytes(HeapAllocated)} heap block";
-    public string PayloadText => Kind.Equals("queue", StringComparison.OrdinalIgnoreCase)
+    public string HeapAllocationText => IsAllocator
+        ? $"{MemoryDashboard.FormatBytes(HeapAllocated)} overhead"
+        : $"{MemoryDashboard.FormatBytes(HeapAllocated)} heap block";
+    public string PayloadText => IsAllocator
+        ? "fixed alignment and end-marker overhead"
+        : Kind.Equals("queue", StringComparison.OrdinalIgnoreCase)
         ? $"payload {MemoryDashboard.FormatBytes(PayloadAllocated)}  |  {ItemSize} B/item"
         : "heap_4 bookkeeping and alignment";
-    public string LiveStateText => Kind.Equals("queue", StringComparison.OrdinalIgnoreCase)
+    public string LiveStateText => IsAllocator
+        ? "summary; not one continuous address range"
+        : Kind.Equals("queue", StringComparison.OrdinalIgnoreCase)
         ? $"{Depth} / {Capacity} messages"
         : "reserved at heap initialization";
-    public string HandleAddressText => $"CTRL  {MemoryDashboard.FormatAddress(HandleAddress)}";
-    public string StorageAddressText => $"DATA  {MemoryDashboard.FormatRange(StorageAddress, StorageEnd)}";
+    public string HandleAddressText => IsAllocator
+        ? "BOUNDARY OVERHEAD"
+        : $"CTRL  {MemoryDashboard.FormatAddress(HandleAddress)}";
+    public string StorageAddressText => IsAllocator
+        ? $"{MemoryDashboard.FormatBytes(HeapAllocated)} total"
+        : $"DATA  {MemoryDashboard.FormatRange(StorageAddress, StorageEnd)}";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

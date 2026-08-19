@@ -31,6 +31,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         FullRange
     }
 
+    private readonly record struct MemoryChartSegment(
+        MemoryRegionRow Region,
+        uint Start,
+        uint End);
+
     private const int MaxLogEntries = 5000;
     private const int MaxVisibleLogEntries = 300;
     private const int MaxLineBytes = 2048;
@@ -424,12 +429,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         string telemetry =
             $"@mem flash_app_start=134217728 flash_used_end=134232160 flash_app_end=134282240 param_start=134282240 param_end=134283264 flash_used=14432 flash_code_const=14428 flash_data_init=4 flash_app_total=64512 flash_parameter=1024 ram_static=6568 ram_data=4 ram_bss=6564 ram_total=20480 data_start=536870912 data_end=536870916 bss_start=536870916 bss_end=536877480 heap_start=536870940 heap_end=536877084 heap_total=6144 heap_initial_free=6128 heap_free={heapFree} heap_min_free={_demoHeapMinimumFree}\r\n" +
-            "@task name=SENSOR stack_alloc=512 stack_min_free=356 heap_alloc=616 priority=1 state=BLOCKED tcb_addr=536871172 tcb_bytes=104 stack_start=536871276 stack_end=536871788\r\n" +
-            "@task name=CONTROL stack_alloc=512 stack_min_free=348 heap_alloc=616 priority=1 state=BLOCKED tcb_addr=536871788 tcb_bytes=104 stack_start=536871892 stack_end=536872404\r\n" +
-            $"@task name=ROUTER stack_alloc=512 stack_min_free={routerStackFree} heap_alloc=616 priority=2 state=RUNNING tcb_addr=536872404 tcb_bytes=104 stack_start=536872508 stack_end=536873020\r\n" +
-            "@task name=IDLE stack_alloc=512 stack_min_free=400 heap_alloc=616 priority=0 state=READY tcb_addr=536873020 tcb_bytes=104 stack_start=536873124 stack_end=536873636\r\n" +
-            $"@object kind=queue name=EVENT_QUEUE handle_addr=536870956 storage_addr=536871044 storage_end=536871172 struct_bytes=88 heap_alloc=216 payload_alloc=128 capacity=8 depth={queueDepth} item_size=16\r\n" +
-            "@object kind=allocator name=HEAP4_METADATA handle_addr=536870940 storage_addr=536870940 storage_end=536870956 struct_bytes=16 heap_alloc=16 payload_alloc=0 capacity=0 depth=0 item_size=0\r\n";
+            "@task name=SENSOR stack_alloc=512 stack_min_free=356 heap_alloc=624 priority=1 state=BLOCKED tcb_addr=536871688 tcb_bytes=96 stack_start=536871168 stack_end=536871680\r\n" +
+            "@task name=CONTROL stack_alloc=512 stack_min_free=348 heap_alloc=624 priority=1 state=BLOCKED tcb_addr=536872312 tcb_bytes=96 stack_start=536871792 stack_end=536872304\r\n" +
+            $"@task name=ROUTER stack_alloc=512 stack_min_free={routerStackFree} heap_alloc=624 priority=2 state=RUNNING tcb_addr=536872936 tcb_bytes=96 stack_start=536872416 stack_end=536872928\r\n" +
+            "@task name=IDLE stack_alloc=512 stack_min_free=400 heap_alloc=624 priority=0 state=READY tcb_addr=536873560 tcb_bytes=96 stack_start=536873040 stack_end=536873552\r\n" +
+            $"@object kind=queue name=EVENT_QUEUE handle_addr=536870952 storage_addr=536871032 storage_end=536871160 struct_bytes=80 heap_alloc=216 payload_alloc=128 capacity=8 depth={queueDepth} item_size=16\r\n" +
+            "@object kind=allocator name=HEAP4_METADATA handle_addr=0 storage_addr=0 storage_end=0 struct_bytes=0 heap_alloc=16 payload_alloc=0 capacity=0 depth=0 item_size=0\r\n";
         ProcessReceivedBytes(Encoding.ASCII.GetBytes(telemetry), SerialDirection.Demo);
     }
 
@@ -1119,25 +1124,20 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         uint address = Memory.HeapStart + (uint)Math.Min(
             Memory.HeapEnd - Memory.HeapStart - 1U,
             fraction * (Memory.HeapEnd - (double)Memory.HeapStart));
-        MemoryRegionRow? block = Memory.Regions
-            .Where(region =>
-                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
-                region.Start >= Memory.HeapStart &&
-                region.End <= Memory.HeapEnd &&
-                region.End > region.Start &&
-                address >= region.Start &&
-                address < region.End)
-            .OrderBy(region => region.Size)
-            .ThenBy(region => region.Start)
+        MemoryChartSegment? hit = GetMemoryChartSegments()
+            .Where(segment => address >= segment.Start && address < segment.End)
+            .OrderBy(segment => segment.End - segment.Start)
+            .ThenBy(segment => segment.Start)
+            .Select(segment => (MemoryChartSegment?)segment)
             .FirstOrDefault();
 
-        if (block is null)
+        if (hit is not { } segment)
         {
             CloseMemoryHover();
             return;
         }
 
-        string hoverKey = $"{block.Kind}:{block.Start:X8}:{block.End:X8}";
+        string hoverKey = $"{segment.Region.Kind}:{segment.Start:X8}:{segment.End:X8}";
         if (_memoryHoverKey == hoverKey)
         {
             UpdateMemoryHoverCardPosition(position);
@@ -1145,7 +1145,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         _memoryHoverKey = hoverKey;
-        string hoverText = FormatMemoryBlockHoverText(block);
+        string hoverText = FormatMemoryBlockHoverText(segment);
         MemoryBlockHoverText.Text = hoverText.Replace("\n", "  |  ", StringComparison.Ordinal);
         ShowMemoryHoverCard(hoverText, position);
     }
@@ -1622,17 +1622,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
-        MemoryRegionRow[] blocks = Memory.Regions
-            .Where(region =>
-                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
-                region.Start >= heapStart &&
-                region.End <= heapEnd &&
-                region.End > region.Start)
-            .OrderBy(region => region.Start)
-            .ThenBy(region => region.End)
-            .ToArray();
-        string signature = $"{heapStart:X8}:{heapEnd:X8}|" + string.Join("|", blocks.Select(block =>
-            $"{block.Kind}:{block.Owner}:{block.Start:X8}:{block.End:X8}"));
+        MemoryChartSegment[] segments = GetMemoryChartSegments();
+        string signature = $"{heapStart:X8}:{heapEnd:X8}|" + string.Join("|", segments.Select(segment =>
+            $"{segment.Region.Kind}:{segment.Region.Owner}:{segment.Start:X8}:{segment.End:X8}"));
         if (_memoryChartSignature == signature &&
             _memoryChartWidth == width &&
             _memoryChartHeight == height &&
@@ -1678,23 +1670,22 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         double heapSpan = heapEnd - (double)heapStart;
         int legendColumns = Math.Max(1, (int)(barWidth / 150));
 
-        for (int index = 0; index < blocks.Length; index++)
+        for (int index = 0; index < segments.Length; index++)
         {
-            MemoryRegionRow block = blocks[index];
+            MemoryChartSegment segment = segments[index];
+            MemoryRegionRow block = segment.Region;
             SolidColorBrush fill = new(ParseColor(blockPalette[index % blockPalette.Length]));
-            double x = left + ((block.Start - heapStart) / heapSpan * barWidth);
-            double blockWidth = Math.Max(2, (block.End - block.Start) / heapSpan * barWidth);
-            Rectangle segment = new()
+            double x = left + Math.Round((segment.Start - heapStart) / heapSpan * barWidth);
+            double endX = left + Math.Round((segment.End - heapStart) / heapSpan * barWidth);
+            Rectangle segmentShape = new()
             {
-                Width = Math.Min(blockWidth, left + barWidth - x),
+                Width = Math.Max(1, Math.Min(endX, left + barWidth) - x),
                 Height = barHeight,
-                Fill = fill,
-                Stroke = new SolidColorBrush(ColorHelper.FromArgb(150, 255, 255, 255)),
-                StrokeThickness = 0.5
+                Fill = fill
             };
-            Canvas.SetLeft(segment, x);
-            Canvas.SetTop(segment, top);
-            MemoryCanvas.Children.Add(segment);
+            Canvas.SetLeft(segmentShape, x);
+            Canvas.SetTop(segmentShape, top);
+            MemoryCanvas.Children.Add(segmentShape);
 
             int legendRow = index / legendColumns;
             int legendColumn = index % legendColumns;
@@ -1714,14 +1705,63 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
     }
 
-    private static string FormatMemoryBlockHoverText(MemoryRegionRow block)
+    private MemoryChartSegment[] GetMemoryChartSegments()
     {
-        return $"{block.Kind}  |  {block.Owner}\n{block.RangeText}  |  {block.SizeText}";
+        uint heapStart = Memory.HeapStart;
+        uint heapEnd = Memory.HeapEnd;
+        MemoryRegionRow[] regions = Memory.Regions
+            .Where(region =>
+                !region.Kind.Equals("FREERTOS HEAP", StringComparison.OrdinalIgnoreCase) &&
+                !region.Kind.StartsWith("ALLOCATOR ", StringComparison.OrdinalIgnoreCase) &&
+                region.Start >= heapStart &&
+                region.End <= heapEnd &&
+                region.End > region.Start)
+            .OrderBy(region => region.Start)
+            .ThenBy(region => region.End)
+            .ToArray();
+        List<MemoryChartSegment> segments = [];
+
+        for (int index = 0; index < regions.Length; index++)
+        {
+            MemoryRegionRow region = regions[index];
+            uint displayEnd = region.End;
+
+            for (int nextIndex = index + 1; nextIndex < regions.Length; nextIndex++)
+            {
+                uint nextStart = regions[nextIndex].Start;
+                if (nextStart <= region.Start)
+                {
+                    continue;
+                }
+
+                if (nextStart < displayEnd)
+                {
+                    displayEnd = nextStart;
+                }
+
+                break;
+            }
+
+            if (displayEnd > region.Start)
+            {
+                segments.Add(new MemoryChartSegment(region, region.Start, displayEnd));
+            }
+        }
+
+        return [.. segments];
+    }
+
+    private static string FormatMemoryBlockHoverText(MemoryChartSegment segment)
+    {
+        uint size = segment.End - segment.Start;
+        return $"{segment.Region.Kind}  |  {segment.Region.Owner}\n" +
+               $"{MemoryDashboard.FormatRange(segment.Start, segment.End)}  |  " +
+               MemoryDashboard.FormatBytes(size);
     }
 
     private static string GetDefaultMemoryBlockHoverText()
     {
-        return "colored = known object  |  gray = free or allocator overhead";
+        return "colored = object payload  |  gray = free, block headers, or boundary overhead";
     }
 
     private TextBlock CreateMemoryCanvasLabel(string text, Brush foreground)

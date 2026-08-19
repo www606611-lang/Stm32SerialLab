@@ -701,7 +701,7 @@
                                 Grid.Column="1"
                                 HorizontalAlignment="Right"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="colored = known object  |  gray = free or allocator overhead"
+                                Text="colored = object payload  |  gray = free, block headers, or boundary overhead"
                                 TextTrimming="CharacterEllipsis" />
                         </Grid>
                         <Canvas
