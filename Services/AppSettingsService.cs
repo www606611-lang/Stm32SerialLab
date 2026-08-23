@@ -97,6 +97,7 @@ internal sealed class AppSettings
     public int SendModeIndex { get; set; }
     public int LineEndingIndex { get; set; } = 2;
     public bool AutoScroll { get; set; } = true;
+    public bool ShowProtocolMessages { get; set; }
     public bool DemoEnabled { get; set; } = true;
     public int WorkspaceTabIndex { get; set; }
     public int ScopeTimeWindowIndex { get; set; } = 6;

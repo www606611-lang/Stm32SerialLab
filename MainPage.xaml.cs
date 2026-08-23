@@ -67,6 +67,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private bool _loaded;
     private bool _settingsReady;
     private bool _refreshingPorts;
+    private bool _showProtocolMessages;
     private bool _displayHex;
     private bool _autoYInitialized;
     private bool _manualYInitialized;
@@ -149,6 +150,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         UpdateThemeButton(ActualTheme);
         RefreshPorts();
         RestoreSettings();
+        UpdatePauseButton();
         _plotTimer.Start();
         _uiRefreshTimer.Start();
         SetDemoMode(DemoToggle.IsChecked == true);
@@ -213,6 +215,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         SendModeComboBox.SelectedIndex = Math.Clamp(settings.SendModeIndex, 0, SendModeComboBox.Items.Count - 1);
         LineEndingComboBox.SelectedIndex = Math.Clamp(settings.LineEndingIndex, 0, LineEndingComboBox.Items.Count - 1);
         AutoScrollButton.IsChecked = settings.AutoScroll;
+        ProtocolMessagesButton.IsChecked = settings.ShowProtocolMessages;
+        _showProtocolMessages = settings.ShowProtocolMessages;
         DemoToggle.IsChecked = settings.DemoEnabled;
         WorkspaceTabs.SelectedIndex = Math.Clamp(settings.WorkspaceTabIndex, 0, 3);
         TimeWindowSlider.Value = Math.Clamp(settings.ScopeTimeWindowIndex, 0, TimeWindowSteps.Length - 1);
@@ -473,16 +477,27 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private void ProcessReceivedBytes(byte[] data, SerialDirection direction)
     {
         _rxBytes += data.Length;
-        AddLog(new SerialLogEntry(DateTimeOffset.Now, direction, data));
 
         foreach (byte value in data)
         {
             if (value == (byte)'\n')
             {
                 _rxLines++;
-                string line = Utf8.GetString(_lineBuffer.ToArray()).TrimEnd('\r');
+                byte[] lineBytes = _lineBuffer.ToArray();
+                int payloadLength = lineBytes.Length > 0 && lineBytes[^1] == (byte)'\r'
+                    ? lineBytes.Length - 1
+                    : lineBytes.Length;
+                string line = Utf8.GetString(lineBytes, 0, payloadLength);
                 _lineBuffer.Clear();
-                ProcessTelemetryLine(line, direction);
+                bool isProtocol = ProcessTelemetryLine(line, direction);
+                if (line.Length > 0)
+                {
+                    AddLog(new SerialLogEntry(
+                        DateTimeOffset.Now,
+                        direction,
+                        lineBytes[..payloadLength],
+                        isProtocol: isProtocol));
+                }
                 continue;
             }
 
@@ -500,38 +515,38 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _countersDirty = true;
     }
 
-    private void ProcessTelemetryLine(string line, SerialDirection direction)
+    private bool ProcessTelemetryLine(string line, SerialDirection direction)
     {
         MemoryTelemetryParseResult memoryResult = _memoryTelemetryParser.Parse(line);
         if (memoryResult.IsError)
         {
             _parseErrors++;
-            return;
+            return false;
         }
 
         if (memoryResult.IsMemoryTelemetry)
         {
             ApplyMemoryTelemetry(memoryResult, direction);
-            return;
+            return true;
         }
 
         TelemetryParseResult result = _telemetryParser.Parse(line);
         if (result.IsError)
         {
             _parseErrors++;
-            return;
+            return false;
         }
 
         if (result.Metadata is { } metadata)
         {
             GetOrCreateMetric(metadata.Name).ApplyMetadata(metadata.Unit, metadata.Minimum, metadata.Maximum);
             TransientStatusText.Text = $"Metadata: {metadata.Name}";
-            return;
+            return true;
         }
 
         if (!result.IsTelemetry || result.IsHeader)
         {
-            return;
+            return false;
         }
 
         DateTimeOffset now = DateTimeOffset.Now;
@@ -539,6 +554,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             GetOrCreateMetric(name).AddSample(now, value);
         }
+
+        return false;
     }
 
     private void ApplyMemoryTelemetry(
@@ -740,6 +757,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void PauseButton_Click(object sender, RoutedEventArgs e)
     {
+        UpdatePauseButton();
+
         if (PauseButton.IsChecked == true)
         {
             _pendingVisibleLogs.Clear();
@@ -749,7 +768,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         _pendingVisibleLogs.Clear();
         Logs.Clear();
-        foreach (SerialLogEntry entry in _allLogs.TakeLast(MaxVisibleLogEntries))
+        foreach (SerialLogEntry entry in _allLogs.Where(ShouldShowInConsole).TakeLast(MaxVisibleLogEntries))
         {
             _pendingVisibleLogs.Enqueue(entry);
         }
@@ -759,6 +778,16 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         EmptyLogText.Visibility = Logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ScrollToLatest();
         TransientStatusText.Text = "Timeline resumed";
+    }
+
+    private void UpdatePauseButton()
+    {
+        bool paused = PauseButton.IsChecked == true;
+        string action = paused ? "Resume" : "Pause";
+        PauseButton.Icon = new SymbolIcon(paused ? Symbol.Play : Symbol.Pause);
+        PauseButton.Label = action;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PauseButton, $"{action} visible timeline");
+        ToolTipService.SetToolTip(PauseButton, $"{action} the visible timeline");
     }
 
     private void DisplayModeSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
@@ -879,6 +908,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             return;
         }
 
+        if (!ShouldShowInConsole(entry))
+        {
+            return;
+        }
+
         _pendingVisibleLogs.Enqueue(entry);
         while (_pendingVisibleLogs.Count > MaxVisibleLogEntries)
         {
@@ -888,7 +922,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private SerialLogEntry CreateVisibleLogEntry(SerialLogEntry source)
     {
-        SerialLogEntry visibleEntry = new(source.Timestamp, source.Direction, source.Data, source.TextOverride);
+        SerialLogEntry visibleEntry = new(
+            source.Timestamp,
+            source.Direction,
+            source.Data,
+            source.TextOverride,
+            source.IsProtocol);
         visibleEntry.SetHexDisplay(_displayHex);
         return visibleEntry;
     }
@@ -952,6 +991,35 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
 
         SaveSettings(settings => settings.AutoScroll = AutoScrollButton.IsChecked == true);
+    }
+
+    private void ProtocolMessagesButton_Click(object sender, RoutedEventArgs e)
+    {
+        _showProtocolMessages = ProtocolMessagesButton.IsChecked == true;
+        SaveSettings(settings => settings.ShowProtocolMessages = _showProtocolMessages);
+        RebuildVisibleTimeline();
+        TransientStatusText.Text = _showProtocolMessages
+            ? "Protocol frames visible"
+            : "Protocol frames hidden; Memory page still updates";
+    }
+
+    private bool ShouldShowInConsole(SerialLogEntry entry)
+    {
+        return _showProtocolMessages || !entry.IsProtocol;
+    }
+
+    private void RebuildVisibleTimeline()
+    {
+        _pendingVisibleLogs.Clear();
+        Logs.Clear();
+        foreach (SerialLogEntry entry in _allLogs.Where(ShouldShowInConsole).TakeLast(MaxVisibleLogEntries))
+        {
+            _pendingVisibleLogs.Enqueue(entry);
+        }
+
+        FlushVisibleLogs(MaxVisibleLogEntries);
+        EmptyLogText.Visibility = Logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ScrollToLatest();
     }
 
     private void LogListView_Loaded(object sender, RoutedEventArgs e)

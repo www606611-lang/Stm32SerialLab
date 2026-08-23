@@ -180,6 +180,12 @@
                             IsChecked="True"
                             Label="Auto scroll"
                             ToolTipService.ToolTip="Keep newest traffic visible" />
+                        <AppBarToggleButton
+                            x:Name="ProtocolMessagesButton"
+                            Click="ProtocolMessagesButton_Click"
+                            Icon="Filter"
+                            Label="Protocol"
+                            ToolTipService.ToolTip="Show internal @mem, @task, @object and @meta frames" />
                         <AppBarButton
                             Click="ClearLog_Click"
                             Icon="Delete"
@@ -198,7 +204,7 @@
                             AutomationProperties.Name="Serial traffic timeline"
                             ItemsSource="{x:Bind Logs}"
                             Loaded="LogListView_Loaded"
-                            ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                             SelectionMode="None">
                             <ListView.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -214,7 +220,7 @@
                             </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:SerialLogEntry">
-                                    <Grid MinWidth="680" Padding="8,4" ColumnSpacing="10">
+                                    <Grid Padding="8,4" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="92" />
                                             <ColumnDefinition Width="44" />
@@ -249,7 +255,7 @@
                                             IsTextSelectionEnabled="True"
                                             Style="{StaticResource LabMonoTextStyle}"
                                             Text="{x:Bind DisplayText, Mode=OneWay}"
-                                            TextWrapping="NoWrap" />
+                                            TextWrapping="Wrap" />
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>

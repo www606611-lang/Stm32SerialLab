@@ -18,12 +18,18 @@ public sealed class SerialLogEntry : INotifyPropertyChanged
 {
     private string _displayText;
 
-    public SerialLogEntry(DateTimeOffset timestamp, SerialDirection direction, byte[] data, string? textOverride = null)
+    public SerialLogEntry(
+        DateTimeOffset timestamp,
+        SerialDirection direction,
+        byte[] data,
+        string? textOverride = null,
+        bool isProtocol = false)
     {
         Timestamp = timestamp;
         Direction = direction;
         Data = data;
         TextOverride = textOverride;
+        IsProtocol = isProtocol;
         _displayText = textOverride ?? FormatAscii(data);
     }
 
@@ -31,6 +37,7 @@ public sealed class SerialLogEntry : INotifyPropertyChanged
     public SerialDirection Direction { get; }
     public byte[] Data { get; }
     public string? TextOverride { get; }
+    public bool IsProtocol { get; }
     public int ByteCount => Data.Length;
     public string AsciiText => TextOverride ?? FormatAscii(Data);
     public string HexText => TextOverride ?? FormatHex(Data);
