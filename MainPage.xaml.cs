@@ -59,11 +59,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private readonly List<byte> _lineBuffer = [];
     private readonly Dictionary<string, TelemetryMetric> _metricsByName = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _commandHistory = [];
-    private readonly DispatcherTimer _demoTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer _plotTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
-    private readonly Stopwatch _demoClock = new();
-    private readonly Random _random = new();
     private bool _loaded;
     private bool _settingsReady;
     private bool _refreshingPorts;
@@ -98,9 +95,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     private DateTimeOffset _lastAutoYUpdate = DateTimeOffset.Now;
     private DateTimeOffset _scopeEndTime;
     private DateTimeOffset _panStartEndTime;
-    private double _demoAverage = 1870;
-    private long _lastDemoMemoryTick = -1000;
-    private uint _demoHeapMinimumFree = 3448;
     private long _rxBytes;
     private long _txBytes;
     private long _rxLines;
@@ -114,7 +108,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         InitializeComponent();
         _serialPort.BytesReceived += SerialPort_BytesReceived;
         _serialPort.PortError += SerialPort_PortError;
-        _demoTimer.Tick += DemoTimer_Tick;
         _plotTimer.Tick += PlotTimer_Tick;
         _uiRefreshTimer.Tick += UiRefreshTimer_Tick;
         ActualThemeChanged += MainPage_ActualThemeChanged;
@@ -153,7 +146,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         UpdatePauseButton();
         _plotTimer.Start();
         _uiRefreshTimer.Start();
-        SetDemoMode(DemoToggle.IsChecked == true);
         _settingsReady = true;
         SendTextBox.Focus(FocusState.Programmatic);
     }
@@ -162,7 +154,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         _plotTimer.Stop();
         _uiRefreshTimer.Stop();
-        _demoTimer.Stop();
         _ = Task.Run(_serialPort.Close);
     }
 
@@ -217,7 +208,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         AutoScrollButton.IsChecked = settings.AutoScroll;
         ProtocolMessagesButton.IsChecked = settings.ShowProtocolMessages;
         _showProtocolMessages = settings.ShowProtocolMessages;
-        DemoToggle.IsChecked = settings.DemoEnabled;
         WorkspaceTabs.SelectedIndex = Math.Clamp(settings.WorkspaceTabIndex, 0, 3);
         TimeWindowSlider.Value = Math.Clamp(settings.ScopeTimeWindowIndex, 0, TimeWindowSteps.Length - 1);
         VerticalGainSlider.Value = Math.Clamp(settings.ScopeVerticalGainIndex, 0, VerticalGainSteps.Length - 1);
@@ -328,8 +318,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         try
         {
-            DemoToggle.IsChecked = false;
-            SetDemoMode(false);
             SetSerialOperationState(true, $"Connecting to {portName}");
             SetConnectionState(false, $"CONNECTING {portName}...");
             Stopwatch stopwatch = Stopwatch.StartNew();
@@ -349,97 +337,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             SetSerialOperationState(false);
             RefreshCounters();
         }
-    }
-
-    private void DemoToggle_Click(object sender, RoutedEventArgs e)
-    {
-        SetDemoMode(DemoToggle.IsChecked == true);
-    }
-
-    private void SetDemoMode(bool enabled)
-    {
-        if (enabled)
-        {
-            if (_serialPort.IsOpen)
-            {
-                _serialPort.Close();
-            }
-
-            if (!_demoTimer.IsEnabled)
-            {
-                ResetMemoryDashboard("DEMO / PC GENERATED");
-                EnsureDemoMetadata();
-                _demoClock.Restart();
-                _lastDemoMemoryTick = -1000;
-                _demoHeapMinimumFree = 3448;
-                _demoTimer.Start();
-                AddSystemLog("Demo telemetry started");
-            }
-
-            SetConnectionState(false, "DEMO");
-            ConnectionDot.Fill = new SolidColorBrush(ColorHelper.FromArgb(255, 147, 51, 234));
-        }
-        else
-        {
-            _demoTimer.Stop();
-            ResetMemoryDashboard("WAITING FOR STM32 TELEMETRY");
-            if (!_serialPort.IsOpen)
-            {
-                SetConnectionState(false, "DISCONNECTED");
-            }
-        }
-
-        SaveSettings(settings => settings.DemoEnabled = enabled);
-    }
-
-    private void EnsureDemoMetadata()
-    {
-        if (_metricsByName.TryGetValue("adc", out TelemetryMetric? adcMetric) && adcMetric.HasDeclaredRange)
-        {
-            return;
-        }
-
-        const string metadata = "@meta tick unit=ms\r\n" +
-                                "@meta heap unit=B min=0 max=6144\r\n" +
-                                "@meta adc unit=count min=0 max=4095\r\n" +
-                                "@meta avg unit=count min=0 max=4095\r\n" +
-                                "@meta overrun unit=count\r\n";
-        ProcessReceivedBytes(Encoding.ASCII.GetBytes(metadata), SerialDirection.Demo);
-    }
-
-    private void DemoTimer_Tick(object? sender, object e)
-    {
-        long tick = _demoClock.ElapsedMilliseconds;
-        double phase = tick / 900.0;
-        int adc = (int)Math.Round(1870 + Math.Sin(phase) * 210 + Math.Sin(phase * 0.23) * 55 + _random.Next(-8, 9));
-        _demoAverage = (_demoAverage * 0.88) + (adc * 0.12);
-        int heap = 4224 - (int)((tick / 10000) % 4) * 16;
-        string line = FormattableString.Invariant($"tick={tick} heap={heap} adc={adc} avg={_demoAverage:F1} overrun=0\r\n");
-        ProcessReceivedBytes(Encoding.ASCII.GetBytes(line), SerialDirection.Demo);
-
-        if (tick - _lastDemoMemoryTick >= 1000)
-        {
-            _lastDemoMemoryTick = tick;
-            EmitDemoMemoryTelemetry(tick);
-        }
-    }
-
-    private void EmitDemoMemoryTelemetry(long tick)
-    {
-        uint queueDepth = (uint)((tick / 1000) % 3);
-        uint routerStackFree = tick < 5000 ? 320U : tick < 10000 ? 300U : 284U;
-        const uint heapFree = 3448;
-        _demoHeapMinimumFree = Math.Min(_demoHeapMinimumFree, heapFree);
-
-        string telemetry =
-            $"@mem flash_app_start=134217728 flash_used_end=134232160 flash_app_end=134282240 param_start=134282240 param_end=134283264 flash_used=14432 flash_code_const=14428 flash_data_init=4 flash_app_total=64512 flash_parameter=1024 ram_static=6568 ram_data=4 ram_bss=6564 ram_total=20480 data_start=536870912 data_end=536870916 bss_start=536870916 bss_end=536877480 heap_start=536870940 heap_end=536877084 heap_total=6144 heap_initial_free=6128 heap_free={heapFree} heap_min_free={_demoHeapMinimumFree}\r\n" +
-            "@task name=SENSOR stack_alloc=512 stack_min_free=356 heap_alloc=624 priority=1 state=BLOCKED tcb_addr=536871688 tcb_bytes=96 stack_start=536871168 stack_end=536871680\r\n" +
-            "@task name=CONTROL stack_alloc=512 stack_min_free=348 heap_alloc=624 priority=1 state=BLOCKED tcb_addr=536872312 tcb_bytes=96 stack_start=536871792 stack_end=536872304\r\n" +
-            $"@task name=ROUTER stack_alloc=512 stack_min_free={routerStackFree} heap_alloc=624 priority=2 state=RUNNING tcb_addr=536872936 tcb_bytes=96 stack_start=536872416 stack_end=536872928\r\n" +
-            "@task name=IDLE stack_alloc=512 stack_min_free=400 heap_alloc=624 priority=0 state=READY tcb_addr=536873560 tcb_bytes=96 stack_start=536873040 stack_end=536873552\r\n" +
-            $"@object kind=queue name=EVENT_QUEUE handle_addr=536870952 storage_addr=536871032 storage_end=536871160 struct_bytes=80 heap_alloc=216 payload_alloc=128 capacity=8 depth={queueDepth} item_size=16\r\n" +
-            "@object kind=allocator name=HEAP4_METADATA handle_addr=0 storage_addr=0 storage_end=0 struct_bytes=0 heap_alloc=16 payload_alloc=0 capacity=0 depth=0 item_size=0\r\n";
-        ProcessReceivedBytes(Encoding.ASCII.GetBytes(telemetry), SerialDirection.Demo);
     }
 
     private void SerialPort_BytesReceived(object? sender, byte[] data)
@@ -489,7 +386,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                     : lineBytes.Length;
                 string line = Utf8.GetString(lineBytes, 0, payloadLength);
                 _lineBuffer.Clear();
-                bool isProtocol = ProcessTelemetryLine(line, direction);
+                bool isProtocol = ProcessTelemetryLine(line);
                 if (line.Length > 0)
                 {
                     AddLog(new SerialLogEntry(
@@ -515,7 +412,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _countersDirty = true;
     }
 
-    private bool ProcessTelemetryLine(string line, SerialDirection direction)
+    private bool ProcessTelemetryLine(string line)
     {
         MemoryTelemetryParseResult memoryResult = _memoryTelemetryParser.Parse(line);
         if (memoryResult.IsError)
@@ -526,7 +423,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
         if (memoryResult.IsMemoryTelemetry)
         {
-            ApplyMemoryTelemetry(memoryResult, direction);
+            ApplyMemoryTelemetry(memoryResult);
             return true;
         }
 
@@ -558,13 +455,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         return false;
     }
 
-    private void ApplyMemoryTelemetry(
-        MemoryTelemetryParseResult result,
-        SerialDirection direction)
+    private void ApplyMemoryTelemetry(MemoryTelemetryParseResult result)
     {
-        string source = direction == SerialDirection.Demo
-            ? "DEMO / PC GENERATED"
-            : "STM32 / SERIAL";
+        const string source = "STM32 / SERIAL";
         DateTimeOffset now = DateTimeOffset.Now;
 
         if (result.Memory is { } memory)
@@ -682,7 +575,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             {
                 _serialPort.Write(bytes);
             }
-            else if (DemoToggle.IsChecked != true)
+            else
             {
                 TransientStatusText.Text = "Not connected";
                 return;
@@ -1081,7 +974,6 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         ConnectButton.IsEnabled = !inProgress;
         PortComboBox.IsEnabled = !inProgress && !_serialPort.IsOpen;
         BaudComboBox.IsEnabled = !inProgress && !_serialPort.IsOpen;
-        DemoToggle.IsEnabled = !inProgress;
 
         if (inProgress)
         {

@@ -10,8 +10,7 @@ public enum SerialDirection
 {
     Receive,
     Transmit,
-    System,
-    Demo
+    System
 }
 
 public sealed class SerialLogEntry : INotifyPropertyChanged
@@ -46,7 +45,6 @@ public sealed class SerialLogEntry : INotifyPropertyChanged
     {
         SerialDirection.Receive => "RX",
         SerialDirection.Transmit => "TX",
-        SerialDirection.Demo => "SIM",
         _ => "SYS"
     };
 
@@ -54,7 +52,6 @@ public sealed class SerialLogEntry : INotifyPropertyChanged
     {
         SerialDirection.Receive => new SolidColorBrush(ColorHelper.FromArgb(255, 15, 118, 110)),
         SerialDirection.Transmit => new SolidColorBrush(ColorHelper.FromArgb(255, 37, 99, 235)),
-        SerialDirection.Demo => new SolidColorBrush(ColorHelper.FromArgb(255, 147, 51, 234)),
         _ => new SolidColorBrush(ColorHelper.FromArgb(255, 107, 114, 128))
     };
 

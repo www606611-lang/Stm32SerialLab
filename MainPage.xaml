@@ -53,7 +53,6 @@
                 <ColumnDefinition Width="40" />
                 <ColumnDefinition Width="40" />
                 <ColumnDefinition Width="40" />
-                <ColumnDefinition Width="40" />
             </Grid.ColumnDefinitions>
             <ComboBox
                 x:Name="PortComboBox"
@@ -110,19 +109,9 @@
                 ToolTipService.ToolTip="Connect serial port">
                 <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Glyph="&#xE703;" />
             </Button>
-            <ToggleButton
-                x:Name="DemoToggle"
-                Grid.Column="6"
-                Width="40"
-                AutomationProperties.Name="Demo telemetry"
-                Click="DemoToggle_Click"
-                Padding="0"
-                ToolTipService.ToolTip="Generate local FreeRTOS-style telemetry">
-                <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Glyph="&#xE890;" />
-            </ToggleButton>
             <Button
                 x:Name="ThemeButton"
-                Grid.Column="7"
+                Grid.Column="6"
                 Width="40"
                 AutomationProperties.Name="Switch to dark theme"
                 Click="ThemeButton_Click"
